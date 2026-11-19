@@ -24,3 +24,24 @@ Una entrada por sesión de trabajo: fecha, tiempo dedicado, qué se hizo, proble
 
 **Uso de IA**
 - Se usó un asistente de IA (Claude) para organizar el plan de trabajo, buscar y verificar fuentes, generar borradores de las respuestas del informe y de los diagramas PlantUML. Todo el contenido fue revisado y las decisiones de arquitectura son propias.
+
+---
+
+## Sesión 2 — 19 de noviembre de 2026 (código del primer avance)
+
+**Tiempo dedicado:** 5 h
+
+**Qué se hizo**
+- Servidor de señalización `servidor/servidor.py` (Python + aiohttp): WebSocket de clientes (`/ws`), enlace entre nodos (`/federacion`), estado (`/salud`). Registro de usuarios, presencia, chat y reenvío de mensajes dirigidos (`oferta`, `respuesta`, `candidato`) al otro nodo.
+- Cliente de consola `servidor/cliente_consola.py` para probar sin interfaz.
+- Infraestructura en `infra/` con Terraform (proveedor `lxc/incus`): red `redmsg` con DNS `.incus`, perfil con límites (1 CPU, 512 MiB) y los contenedores `nodo1` y `nodo2`. cloud-init instala `python3-aiohttp`, copia el código y crea el servicio systemd `mensajero`.
+- Script `scripts/probar_avance.sh` para la demostración: DNS, servicio, `/salud`, mensaje entre nodos y logs.
+- Prueba local con dos procesos (puertos 18081 y 18082): mensajes en ambos sentidos, difusión a todos, presencia y error de destinatario inexistente.
+- `terraform validate` correcto.
+
+**Problemas y soluciones**
+- Si ambos nodos se conectan a la vez se abren dos enlaces de federación → el servidor envía cada mensaje por un solo enlace para no duplicar.
+- El cliente de consola sin teclado (en el script) entraba en un ciclo al leer fin de archivo → ahora, al detectar EOF, solo escucha.
+
+**Uso de IA**
+- Se usó Claude para generar un primer borrador del servidor, del cliente de consola y de los archivos de Terraform; el código se revisó, se probó y se ajustó.
