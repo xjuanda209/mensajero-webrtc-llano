@@ -1,0 +1,15 @@
+@startuml
+!include estilo.iuml
+title Estados de la conexión entre pares (RTCPeerConnection.connectionState)
+[*] --> new : new RTCPeerConnection()
+new --> connecting : intercambio oferta/respuesta\ny candidatos ICE
+connecting --> connected : ICE y DTLS completos
+connecting --> failed : ningún par de candidatos\nfunciona (sin TURN)
+connected --> disconnected : se pierde la red\no el otro extremo
+disconnected --> connected : ICE se recupera
+disconnected --> failed : expira el tiempo
+failed --> connecting : ICE restart\n(reintento)
+connected --> closed : colgar / close()
+failed --> closed : mostrar error al usuario
+closed --> [*]
+@enduml

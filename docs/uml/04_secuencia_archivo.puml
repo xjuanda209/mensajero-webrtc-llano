@@ -1,0 +1,34 @@
+@startuml
+!include estilo.iuml
+title Envío de un archivo por fragmentos (RTCDataChannel)
+actor Ana
+participant "Navegador A" as A
+participant "DataChannel\n(confiable y ordenado)" as DC
+participant "Navegador B" as B
+actor Beto
+Ana -> A : elige archivo (p. ej. video de 25 MB)
+A -> A : sha256 = crypto.subtle.digest(archivo)
+A -> DC : {tipo:"archivo-inicio", id, nombre,\nmime, tamano, fragmentos, sha256}
+DC -> B : metadatos
+B -> B : prepara búfer y barra de progreso
+loop por cada fragmento de 16 KiB
+  alt bufferedAmount > 1 MiB
+    A -> A : pausa hasta el evento\nbufferedamountlow (umbral 256 KiB)
+  end
+  A -> DC : fragmento binario (ArrayBuffer)
+  DC -> B : fragmento
+  A -> A : actualiza progreso emisor
+  B -> B : guarda y actualiza progreso
+end
+A -> DC : {tipo:"archivo-fin", id}
+DC -> B : fin
+B -> B : arma Blob y calcula SHA-256
+alt hash coincide
+  B -> DC : {tipo:"archivo-ok", id}
+  DC -> A : confirmación
+  B -> Beto : vista previa / reproducir / descargar
+else hash distinto o canal cerrado
+  B -> Beto : "Archivo interrumpido o corrupto"
+  B -> DC : {tipo:"archivo-error", id}
+end
+@enduml

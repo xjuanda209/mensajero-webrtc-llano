@@ -1,0 +1,25 @@
+@startuml
+!include estilo.iuml
+title RETO: un participante entra a una sala con 3 personas (malla)
+actor Dani
+participant "Navegador D" as D
+participant "nodo2" as N2
+participant "nodo1" as N1
+participant "Navegadores A, B, C" as X
+Dani -> D : "Unirse a sala proyecto"
+D -> N2 : {tipo:"unirse", sala:"proyecto", de:"dani"}
+N2 -> N1 : sincroniza miembros de la sala (federación)
+N2 --> D : {tipo:"miembros", sala, lista:[ana, beto, caro]}
+N2 -> X : {tipo:"entro", sala, quien:"dani"} (vía nodo1 si aplica)
+loop por cada miembro existente (3 conexiones nuevas)
+  D -> D : new RTCPeerConnection();\naddTrack(cámara/micrófono)
+  D -> N2 : {tipo:"oferta", de:"dani", para:miembro, sala}
+  N2 -> X : reenvío dirigido (local o por nodo1)
+  X -> N2 : {tipo:"respuesta", para:"dani"}
+  N2 -> D : respuesta
+  D <-> X : candidatos ICE dirigidos
+end
+D <-> X : medios en malla (6 conexiones en total con 4 personas)
+D -> D : cuadrícula 2x2 y límite de bitrate\n(maxBitrate por emisor)
+note over D, X : Perfect negotiation: el que entra es "polite";\nsi hay glare, cede y aplica rollback
+@enduml

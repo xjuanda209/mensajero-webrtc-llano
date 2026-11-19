@@ -1,0 +1,32 @@
+@startuml
+!include estilo.iuml
+title Diagrama de despliegue - local (VirtualBox) y nube (Azure)
+node "Navegador usuario A\n(PC, celular)" as NA
+node "Navegador usuario B\n(PC, celular)" as NB
+node "Equipo físico\n(portátil Windows 16 GB  |  servidor Azure)" as HW {
+  node "Ubuntu Server 24.04\n(VM VirtualBox  |  VM Azure B2s)" as OS {
+    node "Incus (daemon)\nred incusbr0 - DNS .incus" as INC {
+      node "pasarela\n(contenedor de sistema)" as GW {
+        component "Caddy :443" as C
+        component "coturn :3478" as T
+      }
+      node "nodo1.incus\n(contenedor de sistema)" as N1 {
+        component "señalización\naiohttp :8080\n(systemd)" as S1
+      }
+      node "nodo2.incus\n(contenedor de sistema)" as N2 {
+        component "señalización\naiohttp :8080\n(systemd)" as S2
+      }
+    }
+  }
+}
+artifact "Terraform + cloud-init\n(infra/)" as TF
+TF ..> INC : crea red, perfiles\ny contenedores
+NA --> C : HTTPS / WSS 443/tcp
+NB --> C : HTTPS / WSS 443/tcp
+NA ..> T : STUN/TURN 3478/udp
+NB ..> T : STUN/TURN 3478/udp
+C --> S1 : HTTP / WS 8080/tcp
+C --> S2 : HTTP / WS 8080/tcp
+S1 <--> S2 : WS 8080 /federacion\n(por nombre)
+NA <..> NB : WebRTC: SRTP (medios) y\nSCTP/DTLS (datos) sobre UDP
+@enduml

@@ -1,0 +1,40 @@
+@startuml
+!include estilo.iuml
+title Inicio de una videollamada (Ana en nodo1, Beto en nodo2)
+actor Ana
+participant "Navegador A" as A
+participant "nodo1" as N1
+participant "nodo2" as N2
+participant "Navegador B" as B
+actor Beto
+participant "STUN/TURN" as T
+Ana -> A : clic en "Llamar"
+A -> A : getUserMedia({audio, video})
+A -> A : addTrack(); createOffer();\nsetLocalDescription(oferta)
+A -> N1 : {tipo:"oferta", de:"ana", para:"beto", sdp}
+N1 -> N2 : reenvío por federación\n(beto está en nodo2)
+N2 -> B : {tipo:"oferta", ...}
+B -> Beto : "Ana te está llamando"
+Beto -> B : clic en "Contestar"
+B -> B : setRemoteDescription(oferta);\ngetUserMedia; addTrack()
+B -> B : createAnswer();\nsetLocalDescription(respuesta)
+B -> N2 : {tipo:"respuesta", para:"ana", sdp}
+N2 -> N1 : reenvío
+N1 -> A : {tipo:"respuesta", ...}
+A -> A : setRemoteDescription(respuesta)
+par Trickle ICE
+  A -> T : Binding request (STUN)
+  T --> A : IP pública reflejada
+  A -> N1 : {tipo:"candidato", para:"beto"}
+  N1 -> N2
+  N2 -> B : addIceCandidate()
+else
+  B -> N2 : {tipo:"candidato", para:"ana"}
+  N2 -> N1
+  N1 -> A : addIceCandidate()
+end
+A <-> B : comprobaciones de conectividad ICE
+A <-> B : handshake DTLS
+A <-> B : audio y video cifrados (SRTP), directo entre pares
+note over N1, N2 : Los servidores solo transportan la señalización;\nlos medios no pasan por ellos (salvo relay TURN)
+@enduml

@@ -1,0 +1,39 @@
+@startuml
+!include estilo.iuml
+title Diagrama de componentes - Mensajero WebRTC
+package "Navegador (interfaz web)" {
+  [Interfaz\nindex.html + app.js] as UI
+  [Captura de medios\ngetUserMedia / getDisplayMedia] as MED
+  [Chat y presencia] as CHAT
+  [Transferencia de archivos\nRTCDataChannel + SHA-256] as FT
+  [Conexión entre pares\nRTCPeerConnection\n(perfect negotiation)] as PC
+  [Cliente de señalización\nWebSocket] as WSC
+}
+package "Pasarela" {
+  [Proxy inverso HTTPS\n(Caddy)] as PROXY
+  [Servidor STUN/TURN\n(coturn)] as TURN
+}
+package "Nodo (nodo1 y nodo2)" {
+  [Servidor de señalización\nPython + aiohttp] as SRV
+  [Directorio de usuarios\ny salas] as DIR
+  [Enlace entre nodos\n(federación)] as FED
+  [Archivos estáticos\nde la interfaz] as STA
+}
+[Nodo remoto\n(el otro nodo)] as REM
+
+UI --> MED
+UI --> CHAT
+UI --> FT
+MED --> PC : pistas de audio/video
+FT --> PC : canal de datos
+CHAT --> WSC : mensajes y presencia
+PC --> WSC : oferta / respuesta /\ncandidatos ICE
+WSC --> PROXY : WSS /ws (443)
+UI ..> PROXY : HTTPS (443)
+PC ..> TURN : STUN/TURN (3478)
+PROXY --> SRV : HTTP / WS (8080)
+SRV --> DIR
+SRV --> STA
+SRV --> FED
+FED <--> REM : WS /federacion
+@enduml

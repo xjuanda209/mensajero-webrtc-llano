@@ -1,0 +1,30 @@
+@startsalt
+{+
+  {* Mensajero WebRTC | Usuario: ana (nodo1) | ● conectado }
+  {
+    {+
+      <b>Contactos / sala
+      ● beto  (nodo2)
+      ● caro  (nodo1)
+      ○ dani  (desconectado)
+      [Unirse a sala]
+    } |
+    {+
+      {+ <b>Video remoto (grande)                                     .
+         .
+         .
+         .
+         {+ video local }
+      }
+      { [Llamar] | [Colgar] | [Silenciar mic] | [Apagar cámara] | [Compartir pantalla] }
+      {+
+        <b>Chat
+        beto: hola, ¿me escuchas?
+        ana: sí, te envío el video
+        informe.pdf  [██████████░░░░] 72 %
+      }
+      { "Escribe un mensaje...                    " | [Adjuntar] | [Enviar] }
+    }
+  }
+}
+@endsalt
