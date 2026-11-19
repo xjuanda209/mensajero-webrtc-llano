@@ -1,0 +1,39 @@
+#cloud-config
+# Configuracion de ${nombre}: instala Python + aiohttp, copia el servidor y lo deja como servicio systemd.
+package_update: true
+packages:
+  - python3-aiohttp
+
+write_files:
+  - path: /opt/mensajero/servidor.py
+    encoding: b64
+    content: ${servidor_b64}
+    permissions: "0755"
+  - path: /opt/mensajero/cliente_consola.py
+    encoding: b64
+    content: ${cliente_b64}
+    permissions: "0755"
+  - path: /etc/systemd/system/mensajero.service
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=Mensajero WebRTC - servidor de senalizacion (${nombre})
+      After=network-online.target
+      Wants=network-online.target
+
+      [Service]
+      Environment=NODO_NOMBRE=${nombre}
+      Environment=NODO_PAR=${par}
+      Environment=PUERTO=${puerto}
+      Environment=PYTHONUNBUFFERED=1
+      ExecStart=/usr/bin/python3 /opt/mensajero/servidor.py
+      Restart=always
+      RestartSec=2
+      DynamicUser=yes
+
+      [Install]
+      WantedBy=multi-user.target
+
+runcmd:
+  - systemctl daemon-reload
+  - systemctl enable --now mensajero.service
