@@ -3,6 +3,11 @@ output "nodos" {
   value       = { for k, v in incus_instance.nodo : k => v.ipv4_address }
 }
 
+output "url" {
+  description = "Dirección para abrir el mensajero desde el navegador"
+  value       = "https://${var.dominio}/  (nodo1: /nodo1/  nodo2: /nodo2/)"
+}
+
 output "siguiente_paso" {
-  value = "Espera a cloud-init: incus exec nodo1 -- cloud-init status --wait ; luego ../scripts/probar_avance.sh"
+  value = "Espera a cloud-init (1-3 min) y ejecuta ../scripts/probar_avance.sh"
 }

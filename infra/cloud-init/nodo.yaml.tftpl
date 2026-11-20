@@ -1,5 +1,6 @@
 #cloud-config
-# Configuracion de ${nombre}: instala Python + aiohttp, copia el servidor y lo deja como servicio systemd.
+# Configuracion de ${nombre}: instala Python + aiohttp, copia el servidor y la interfaz web
+# y lo deja como servicio systemd.
 package_update: true
 packages:
   - python3-aiohttp
@@ -13,6 +14,20 @@ write_files:
     encoding: b64
     content: ${cliente_b64}
     permissions: "0755"
+%{ for archivo, contenido in web ~}
+  - path: /opt/mensajero/web/${archivo}
+    encoding: b64
+    content: ${contenido}
+    permissions: "0644"
+%{ endfor ~}
+  - path: /etc/mensajero.env
+    permissions: "0644"
+    content: |
+      NODO_NOMBRE=${nombre}
+      NODO_PAR=${par}
+      PUERTO=${puerto}
+      PYTHONUNBUFFERED=1
+      ICE_SERVERS='${ice_servers}'
   - path: /etc/systemd/system/mensajero.service
     permissions: "0644"
     content: |
@@ -22,10 +37,7 @@ write_files:
       Wants=network-online.target
 
       [Service]
-      Environment=NODO_NOMBRE=${nombre}
-      Environment=NODO_PAR=${par}
-      Environment=PUERTO=${puerto}
-      Environment=PYTHONUNBUFFERED=1
+      EnvironmentFile=/etc/mensajero.env
       ExecStart=/usr/bin/python3 /opt/mensajero/servidor.py
       Restart=always
       RestartSec=2

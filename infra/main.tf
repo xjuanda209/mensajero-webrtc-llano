@@ -9,6 +9,8 @@ locals {
   }
   servidor_b64 = filebase64("${path.module}/../servidor/servidor.py")
   cliente_b64  = filebase64("${path.module}/../servidor/cliente_consola.py")
+  # Interfaz web que sirve cada nodo (index.html, estilos.css, app.js)
+  web = { for f in fileset("${path.module}/../servidor/web", "*") : f => filebase64("${path.module}/../servidor/web/${f}") }
 }
 
 # Red puente propia: DHCP y DNS (dnsmasq) con el dominio .incus, NAT hacia Internet.
@@ -63,10 +65,52 @@ resource "incus_instance" "nodo" {
       puerto       = var.puerto
       servidor_b64 = local.servidor_b64
       cliente_b64  = local.cliente_b64
+      web          = local.web
+      ice_servers  = var.ice_servers
     })
   }
 
   wait_for {
     type = "ipv4"
   }
+}
+
+# Pasarela: proxy inverso HTTPS (Caddy). Es la única instancia publicada hacia afuera
+# (puertos 80 y 443 del anfitrión); los nodos quedan internos en la red redmsg.
+resource "incus_instance" "pasarela" {
+  name        = "pasarela"
+  description = "Proxy HTTPS (Caddy) hacia nodo1 y nodo2"
+  image       = var.imagen
+  profiles    = [incus_profile.nodo.name]
+
+  config = {
+    "cloud-init.user-data" = templatefile("${path.module}/cloud-init/pasarela.yaml.tftpl", {
+      dominio     = var.dominio
+      tls_interno = var.tls_interno
+      puerto      = var.puerto
+      portada_b64 = filebase64("${path.module}/pasarela/index.html")
+    })
+  }
+
+  device {
+    name = "https"
+    type = "proxy"
+    properties = {
+      listen  = "tcp:0.0.0.0:443"
+      connect = "tcp:127.0.0.1:443"
+    }
+  }
+  device {
+    name = "http"
+    type = "proxy"
+    properties = {
+      listen  = "tcp:0.0.0.0:80"
+      connect = "tcp:127.0.0.1:80"
+    }
+  }
+
+  wait_for {
+    type = "ipv4"
+  }
+  depends_on = [incus_instance.nodo]
 }

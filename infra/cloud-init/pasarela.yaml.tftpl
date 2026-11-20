@@ -1,0 +1,36 @@
+#cloud-config
+# Pasarela: Caddy como proxy inverso HTTPS hacia nodo1.incus y nodo2.incus (por nombre).
+package_update: true
+packages:
+  - caddy
+
+write_files:
+  - path: /var/www/mensajero/index.html
+    encoding: b64
+    content: ${portada_b64}
+    permissions: "0644"
+  - path: /etc/caddy/Caddyfile
+    permissions: "0644"
+    content: |
+      ${dominio} {
+      %{ if tls_interno ~}
+        tls internal
+      %{ endif ~}
+        encode gzip
+        redir /nodo1 /nodo1/
+        redir /nodo2 /nodo2/
+        handle_path /nodo1/* {
+          reverse_proxy nodo1.incus:${puerto}
+        }
+        handle_path /nodo2/* {
+          reverse_proxy nodo2.incus:${puerto}
+        }
+        handle {
+          root * /var/www/mensajero
+          file_server
+        }
+      }
+
+runcmd:
+  - systemctl enable caddy
+  - systemctl restart caddy
