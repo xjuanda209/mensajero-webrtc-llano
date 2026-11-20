@@ -6,7 +6,7 @@ Una entrada por sesión de trabajo: fecha, tiempo dedicado, qué se hizo, proble
 
 ## Sesión 1 — 19 de noviembre de 2026
 
-**Tiempo dedicado:** 3h
+**Tiempo dedicado:** _(completar)_ h
 
 **Qué se hizo**
 - Lectura de la guía del laboratorio y planeación del cronograma.
@@ -29,7 +29,7 @@ Una entrada por sesión de trabajo: fecha, tiempo dedicado, qué se hizo, proble
 
 ## Sesión 2 — 19 de noviembre de 2026 (código del primer avance)
 
-**Tiempo dedicado:** 5 h
+**Tiempo dedicado:** _(completar)_ h
 
 **Qué se hizo**
 - Servidor de señalización `servidor/servidor.py` (Python + aiohttp): WebSocket de clientes (`/ws`), enlace entre nodos (`/federacion`), estado (`/salud`). Registro de usuarios, presencia, chat y reenvío de mensajes dirigidos (`oferta`, `respuesta`, `candidato`) al otro nodo.
@@ -52,7 +52,7 @@ Una entrada por sesión de trabajo: fecha, tiempo dedicado, qué se hizo, proble
 
 ## Sesión 3 — 19 de noviembre de 2026 (fase 3: interfaz, medios y archivos)
 
-**Tiempo dedicado:** 4h
+**Tiempo dedicado:** _(completar)_ h
 
 **Qué se hizo**
 - Interfaz web (`servidor/web/`): ingreso con nombre, directorio con presencia y nodo de cada usuario, chat, videollamada con contestar/rechazar, silenciar micrófono, apagar cámara y colgar.
@@ -69,3 +69,5 @@ Una entrada por sesión de trabajo: fecha, tiempo dedicado, qué se hizo, proble
 
 **Uso de IA**
 - Claude generó el primer borrador de la interfaz y de la lógica WebRTC; se revisó y se probó con pruebas automáticas.
+
+**Ajuste (20 nov):** al abrir `https://192.168.56.20` el navegador mostraba `ERR_SSL_PROTOCOL_ERROR`. Causa: al entrar por IP el navegador no envía SNI y el dispositivo proxy de Incus entrega la conexión a Caddy por 127.0.0.1, así que Caddy no sabía qué certificado presentar. Solución: opción global `default_sni` en el Caddyfile (se reprodujo y verificó el error y la corrección con Caddy 2.6.2).

@@ -12,6 +12,11 @@ write_files:
   - path: /etc/caddy/Caddyfile
     permissions: "0644"
     content: |
+      {
+        # Los navegadores no envian SNI cuando se entra por IP; ademas el proxy de Incus
+        # entrega la conexion por 127.0.0.1. default_sni indica que certificado usar.
+        default_sni ${dominio}
+      }
       ${dominio} {
       %{ if tls_interno ~}
         tls internal
