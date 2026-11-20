@@ -11,7 +11,8 @@ Mensajero web con chat, videollamada, envío de archivos y videollamada grupal c
 | 1. Investigación | `docs/informe_investigacion.pdf`, diagramas en `docs/uml/` | Entregado |
 | 2. Primer avance (22 nov) | Dos nodos reproducibles con Terraform, señalización y mensajes por consola | Hecho |
 | 3. Interfaz, medios y archivos | Interfaz web, chat, videollamada, archivos con progreso y SHA-256, pasarela HTTPS | Hecho (local) |
-| RETO y nube | Videollamada grupal, pantalla compartida, despliegue en Azure con TURN | Pendiente |
+| 4. RETO | Salas de videollamada en malla (4+), pantalla compartida, chat de sala, entrada con balanceo | Hecho (local) |
+| 5. Nube | Despliegue en Azure con TURN propio | Pendiente |
 
 ## Estructura
 
@@ -27,7 +28,6 @@ infra/
   main.tf, variables.tf ...   Terraform: red Incus, perfil y los dos nodos
   cloud-init/nodo.yaml.tftpl  instala Python + aiohttp, copia servidor e interfaz y crea el servicio systemd
   cloud-init/pasarela.yaml.tftpl  Caddy: proxy HTTPS hacia nodo1.incus y nodo2.incus
-  pasarela/index.html         portada para elegir nodo
 scripts/
   probar_avance.sh            demostración del primer avance (DNS, servicio, mensajes, logs)
   actualizar_nodos.sh         copia servidor e interfaz a los nodos sin recrearlos
@@ -71,10 +71,12 @@ Para actualizar el código de un nodo: `terraform apply -replace='incus_instance
 
 Después de `terraform apply` (crea también la instancia `pasarela` con Caddy), desde el navegador del equipo anfitrión:
 
-1. Abrir `https://192.168.56.20/`. La primera vez el navegador advierte que el certificado no es de confianza (lo firma la CA interna de Caddy): **Configuración avanzada → Continuar**. HTTPS es obligatorio para usar cámara y micrófono.
-2. Elegir **nodo1** o **nodo2** y escribir un nombre. Para probar entre nodos: una ventana por `/nodo1/` y otra (ventana de incógnito u otro navegador) por `/nodo2/`.
+1. Abrir `https://192.168.56.20/`. La pasarela asigna automáticamente un nodo (balanceo con cookie: la página y el WebSocket quedan en el mismo nodo; si un nodo cae, los nuevos usuarios van al otro). Para forzar un nodo en las demos: `/nodo1/` o `/nodo2/`. La primera vez el navegador advierte que el certificado no es de confianza (lo firma la CA interna de Caddy): **Configuración avanzada → Continuar**. HTTPS es obligatorio para usar cámara y micrófono.
+2. Escribir un nombre (se recuerda en el navegador). Para probar entre nodos: una ventana por `/nodo1/` y otra (incógnito u otro navegador) por `/nodo2/`.
 3. Clic en un contacto para chatear. Botón de cámara: videollamada (el otro contesta o rechaza); durante la llamada se puede silenciar, apagar la cámara y colgar.
 4. Clip: enviar archivos de cualquier tipo y tamaño (probado con 21 MB y 40 MB). Barra de progreso en ambos lados; el receptor verifica SHA-256 y puede ver imágenes, reproducir audio y video o descargar.
+
+5. **Salas (RETO):** «+ Sala» crea o une a una sala. Cada participante abre una conexión con cada uno de los demás (malla: 4 personas = 6 conexiones). La cuadrícula se reorganiza al entrar o salir; el bitrate de video se limita según el número de participantes (1 Mbit/s, 600 kbit/s o 350 kbit/s por emisor). «Compartir pantalla» reemplaza la cámara con `replaceTrack()` (sin renegociar); el servidor permite un solo presentador por sala y su video se muestra grande. La sala tiene su propio chat. Las salas viven en memoria y se replican entre los dos nodos por la federación (no se requiere base de datos).
 
 Errores que se muestran al usuario: permiso de cámara negado, contacto desconectado (termina la llamada), archivo interrumpido, sin respuesta a la llamada, pérdida de conexión con el servidor (reintenta cada 3 s).
 

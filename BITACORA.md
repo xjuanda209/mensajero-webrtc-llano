@@ -71,3 +71,22 @@ Una entrada por sesión de trabajo: fecha, tiempo dedicado, qué se hizo, proble
 - Claude generó el primer borrador de la interfaz y de la lógica WebRTC; se revisó y se probó con pruebas automáticas.
 
 **Ajuste (20 nov):** al abrir `https://192.168.56.20` el navegador mostraba `ERR_SSL_PROTOCOL_ERROR`. Causa: al entrar por IP el navegador no envía SNI y el dispositivo proxy de Incus entrega la conexión a Caddy por 127.0.0.1, así que Caddy no sabía qué certificado presentar. Solución: opción global `default_sni` en el Caddyfile (se reprodujo y verificó el error y la corrección con Caddy 2.6.2).
+
+---
+
+## Sesión 4 — 20 de noviembre de 2026 (RETO y mejora de la entrada)
+
+**Tiempo dedicado:** _(completar)_ h
+
+**Qué se hizo**
+- RETO, salas en el servidor: `unirse`, `salir`, `miembros`, `entro`, `salio`, `salas`, chat de sala y control de pantalla compartida (un presentador por sala). El estado de las salas se replica entre nodo1 y nodo2 con eventos `sala_evento` por la federación, de modo que una sala puede tener participantes en ambos nodos.
+- RETO, cliente: videollamada grupal en malla (una `RTCPeerConnection` por par, perfect negotiation), cuadrícula que se reorganiza, límite de bitrate según participantes con `RTCRtpSender.setParameters`, pantalla compartida con `getDisplayMedia` + `replaceTrack` y manejo del evento `ended`.
+- Entrada: pantalla de bienvenida sin elegir nodo; Caddy balancea la raíz entre los dos nodos con `lb_policy cookie` (la página y el WebSocket quedan en el mismo nodo) y conmuta si un nodo falla. Las rutas `/nodo1/` y `/nodo2/` se conservan para demostraciones.
+- Prueba automática con 4 navegadores (2 en cada nodo): los 4 ven 3 videos remotos (6 conexiones), chat de sala, pantalla compartida visible para todos, segundo presentador rechazado, salidas dinámicas.
+
+**Decisiones**
+- No se usa base de datos: la guía no pide login ni historial; las salas y usuarios son estado en memoria replicado entre nodos. Se documenta como limitación.
+- Cambio frente a la arquitectura inicial: la portada para elegir nodo se reemplazó por balanceo en la pasarela.
+
+**Uso de IA**
+- Claude propuso y escribió el primer borrador de las salas y la llamada grupal; se verificó con pruebas automáticas de 4 participantes.
