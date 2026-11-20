@@ -37,7 +37,7 @@ ICE = json.loads(os.environ.get("ICE_SERVERS", '[{"urls": "stun:stun.l.google.co
 
 # Tipos que se enrutan a un destinatario (señalización WebRTC y chat).
 DIRIGIDOS = {"chat", "oferta", "respuesta", "candidato", "llamada", "aceptar", "rechazar",
-             "colgar", "ocupado", "pantalla"}
+             "colgar", "ocupado"}
 
 logging.basicConfig(level=logging.INFO, format=f"%(asctime)s [{NODO}] %(message)s", datefmt="%H:%M:%S")
 log = logging.getLogger("mensajero")
@@ -45,6 +45,8 @@ log = logging.getLogger("mensajero")
 locales: dict[str, web.WebSocketResponse] = {}   # usuario -> WebSocket del cliente en ESTE nodo
 remotos: dict[str, str] = {}                      # usuario -> nombre del nodo donde está
 enlaces: set = set()                              # WebSockets abiertos hacia/desde el otro nodo
+salas: dict[str, dict[str, str]] = {}             # sala -> {usuario: nodo}  (estado replicado en ambos nodos)
+presentador: dict[str, str] = {}                  # sala -> usuario que comparte pantalla
 
 
 def sobre(tipo, de=None, para=None, datos=None, sala=None):
@@ -99,6 +101,62 @@ async def entregar(msg, desde_par=False):
     return False
 
 
+# ---------------------------------------------------------------- salas (RETO: llamada grupal)
+def resumen_salas():
+    return [{"sala": n, "miembros": [{"usuario": u, "nodo": nd} for u, nd in sorted(m.items())],
+             "presentador": presentador.get(n)} for n, m in sorted(salas.items()) if m]
+
+
+async def publicar_salas():
+    """Envía a todos los usuarios de ESTE nodo el estado de las salas."""
+    await avisar_locales(sobre("salas", datos={"salas": resumen_salas()}))
+
+
+async def avisar_sala(sala, tipo, quien, datos=None):
+    """Notificación dirigida a cada miembro de la sala (local o en el otro nodo)."""
+    for miembro in list(salas.get(sala, {})):
+        if miembro != quien:
+            await entregar(sobre(tipo, de=quien, para=miembro, sala=sala, datos=datos))
+
+
+def aplicar_evento_sala(accion, sala, quien, nodo):
+    if accion == "entro":
+        salas.setdefault(sala, {})[quien] = nodo
+    elif accion == "salio":
+        salas.get(sala, {}).pop(quien, None)
+        if presentador.get(sala) == quien:
+            presentador.pop(sala, None)
+        if not salas.get(sala):
+            salas.pop(sala, None)
+            presentador.pop(sala, None)
+    elif accion == "pantalla_on":
+        presentador[sala] = quien
+    elif accion == "pantalla_off" and presentador.get(sala) == quien:
+        presentador.pop(sala, None)
+
+
+async def evento_sala(accion, sala, quien):
+    """Aplica un cambio de sala local, lo replica al otro nodo y actualiza a los usuarios."""
+    aplicar_evento_sala(accion, sala, quien, NODO)
+    await enviar_a_par(sobre("sala_evento", de=quien, sala=sala, datos={"accion": accion}))
+    await publicar_salas()
+
+
+async def salir_de_sala(usuario, sala):
+    if usuario not in salas.get(sala, {}):
+        return
+    if presentador.get(sala) == usuario:
+        await avisar_sala(sala, "pantalla", usuario, {"activo": False})
+    await avisar_sala(sala, "salio", usuario)
+    await evento_sala("salio", sala, usuario)
+    log.info("SALA     %s salió de '%s'", usuario, sala)
+
+
+def nombre_sala(texto):
+    limpio = "".join(c for c in str(texto or "").lower().strip().replace(" ", "-") if c.isalnum() or c in "-_")
+    return limpio[:24]
+
+
 # ---------------------------------------------------------------- clientes
 async def ws_cliente(request):
     ws = web.WebSocketResponse(heartbeat=20)
@@ -124,7 +182,7 @@ async def ws_cliente(request):
                 usuario = nombre
                 locales[usuario] = ws
                 log.info("REGISTRO %s desde %s", usuario, ip)
-                await enviar_ws(ws, sobre("bienvenida", para=usuario, datos={"usuarios": directorio()}))
+                await enviar_ws(ws, sobre("bienvenida", para=usuario, datos={"usuarios": directorio(), "salas": resumen_salas()}))
                 presencia = sobre("presencia", de=usuario, datos={"estado": "conectado", "nodo": NODO})
                 await avisar_locales(presencia, excepto=usuario)
                 await enviar_a_par(presencia)
@@ -136,6 +194,42 @@ async def ws_cliente(request):
 
             if tipo == "usuarios":
                 await enviar_ws(ws, sobre("usuarios", para=usuario, datos={"usuarios": directorio()}))
+            elif tipo == "unirse":
+                sala = nombre_sala(msg.get("sala"))
+                if not sala:
+                    await enviar_ws(ws, sobre("error", datos={"motivo": "Nombre de sala inválido"}))
+                    continue
+                for otra in [n for n, m in salas.items() if usuario in m and n != sala]:
+                    await salir_de_sala(usuario, otra)        # una sala a la vez
+                miembros = [{"usuario": u, "nodo": n} for u, n in salas.get(sala, {}).items() if u != usuario]
+                await avisar_sala(sala, "entro", usuario, {"nodo": NODO})
+                await evento_sala("entro", sala, usuario)
+                await enviar_ws(ws, sobre("miembros", para=usuario, sala=sala,
+                                          datos={"miembros": miembros, "presentador": presentador.get(sala)}))
+                log.info("SALA     %s entró a '%s' (%d participante/s)", usuario, sala, len(salas[sala]))
+            elif tipo == "salir":
+                await salir_de_sala(usuario, nombre_sala(msg.get("sala")))
+            elif tipo == "salas":
+                await enviar_ws(ws, sobre("salas", datos={"salas": resumen_salas()}))
+            elif tipo == "pantalla_sala":
+                sala = nombre_sala(msg.get("sala"))
+                activo = bool((msg.get("datos") or {}).get("activo"))
+                if usuario not in salas.get(sala, {}):
+                    continue
+                actual = presentador.get(sala)
+                if activo and actual not in (None, usuario):
+                    await enviar_ws(ws, sobre("pantalla_denegada", sala=sala, datos={"presentador": actual}))
+                    continue
+                if not activo and actual != usuario:
+                    continue
+                await evento_sala("pantalla_on" if activo else "pantalla_off", sala, usuario)
+                await avisar_sala(sala, "pantalla", usuario, {"activo": activo})
+                await enviar_ws(ws, sobre("pantalla", de=usuario, sala=sala, datos={"activo": activo}))
+                log.info("PANTALLA %s %s en '%s'", usuario, "comparte" if activo else "deja de compartir", sala)
+            elif tipo == "chat_sala":
+                sala = nombre_sala(msg.get("sala"))
+                if usuario in salas.get(sala, {}):
+                    await avisar_sala(sala, "chat_sala", usuario, {"texto": str((msg.get("datos") or {}).get("texto", ""))[:2000]})
             elif tipo in DIRIGIDOS:
                 completo = {**sobre(tipo), **{k: msg.get(k) for k in ("para", "sala", "datos") if k in msg},
                             "de": usuario, "nodo": NODO}
@@ -152,6 +246,8 @@ async def ws_cliente(request):
                 await enviar_ws(ws, sobre("error", datos={"motivo": f"Tipo desconocido: {tipo}"}))
     finally:
         if usuario and locales.get(usuario) is ws:
+            for sala in [n for n, m in list(salas.items()) if usuario in m]:
+                await salir_de_sala(usuario, sala)
             del locales[usuario]
             log.info("SALIDA   %s", usuario)
             presencia = sobre("presencia", de=usuario, datos={"estado": "desconectado", "nodo": NODO})
@@ -164,7 +260,9 @@ async def ws_cliente(request):
 async def procesar_federacion(ws, origen):
     enlaces.add(ws)
     log.info("ENLACE   abierto con %s (%d enlace/s)", origen, len(enlaces))
-    await enviar_ws(ws, sobre("hola_nodo", datos={"usuarios": sorted(locales)}))
+    salas_locales = {n: [u for u, nd in m.items() if nd == NODO] for n, m in salas.items()}
+    await enviar_ws(ws, sobre("hola_nodo", datos={"usuarios": sorted(locales), "salas": salas_locales,
+                                                   "presentador": {n: u for n, u in presentador.items() if u in locales}}))
     try:
         async for m in ws:
             if m.type != WSMsgType.TEXT:
@@ -178,6 +276,16 @@ async def procesar_federacion(ws, origen):
                          ", ".join(msg["datos"]["usuarios"]) or "-")
                 for u in msg["datos"].get("usuarios", []):
                     await avisar_locales(sobre("presencia", de=u, datos={"estado": "conectado", "nodo": nodo_par}))
+                for sala, miembros in msg["datos"].get("salas", {}).items():
+                    for u in miembros:
+                        aplicar_evento_sala("entro", sala, u, nodo_par)
+                for sala, u in msg["datos"].get("presentador", {}).items():
+                    aplicar_evento_sala("pantalla_on", sala, u, nodo_par)
+                await publicar_salas()
+            elif tipo == "sala_evento":
+                aplicar_evento_sala(msg["datos"]["accion"], msg["sala"], msg["de"], nodo_par)
+                log.info("SALA     (desde %s) %s %s '%s'", nodo_par, msg["de"], msg["datos"]["accion"], msg["sala"])
+                await publicar_salas()
             elif tipo == "presencia":
                 if msg["datos"]["estado"] == "conectado":
                     remotos[msg["de"]] = nodo_par
@@ -196,7 +304,13 @@ async def procesar_federacion(ws, origen):
         if not enlaces:
             for u in list(remotos):
                 remotos.pop(u)
+                for sala in [n for n, m in list(salas.items()) if u in m]:
+                    for miembro in salas[sala]:
+                        if miembro in locales:
+                            await enviar_ws(locales[miembro], sobre("salio", de=u, para=miembro, sala=sala))
+                    aplicar_evento_sala("salio", sala, u, "?")
                 await avisar_locales(sobre("presencia", de=u, datos={"estado": "desconectado", "nodo": "?"}))
+            await publicar_salas()
 
 
 async def ws_federacion(request):
@@ -227,7 +341,8 @@ async def conectar_par(app):
 # ---------------------------------------------------------------- HTTP
 async def salud(request):
     return web.json_response({"nodo": NODO, "par": PAR, "enlace_activo": bool(enlaces),
-                              "usuarios_locales": sorted(locales), "usuarios_remotos": remotos})
+                              "usuarios_locales": sorted(locales), "usuarios_remotos": remotos,
+                              "salas": resumen_salas()})
 
 
 async def config(request):

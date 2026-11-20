@@ -22,6 +22,8 @@ const S = {
   abierto: null,
   pares: new Map(),           // nombre -> Par
   llamada: null,              // { con, estado, local, inicio, timer }
+  sala: null,                 // { nombre, local, miembros: Map(usuario -> nodo), presentador, pantalla }
+  salas: [],                  // resumen de salas activas en ambos nodos
   entrante: null,             // { de, timer }
 };
 window.__mensajero = S;       // para depurar desde la consola del navegador
@@ -64,8 +66,10 @@ function alMensajeServidor(m) {
       S.registrado = true;
       $("senal").className = "senal ok";
       for (const u of d.usuarios) if (u.usuario !== S.yo) S.usuarios.set(u.usuario, { nodo: u.nodo, conectado: true });
+      S.salas = d.salas || [];
+      try { localStorage.setItem("mensajero_nombre", S.yo); } catch (e) {}
       if ($("app").classList.contains("oculto")) entrar();
-      pintarLista();
+      pintarLista(); pintarSalas();
       break;
     case "error":
       if (!S.registrado) { $("errorAcceso").textContent = d.motivo; S.yo = null; S.ws.close(); }
@@ -88,7 +92,14 @@ function alMensajeServidor(m) {
     case "candidato":
       obtenerPar(m.de).encolar(() => obtenerPar(m.de).alCandidato(d.candidato));
       break;
-    case "llamada": llamadaEntrante(m.de); break;
+    case "llamada": if (S.sala) senal({ tipo: "ocupado", para: m.de }); else llamadaEntrante(m.de); break;
+    case "salas": S.salas = d.salas || []; pintarSalas(); break;
+    case "miembros": if (S.sala && m.sala === S.sala.nombre) { S.sala.presentador = d.presentador; for (const x of d.miembros) agregarMiembro(x.usuario, x.nodo); pintarGrupo(); } break;
+    case "entro": if (S.sala && m.sala === S.sala.nombre) { agregarMiembro(m.de, d.nodo); pintarGrupo(); mensajeSala(`${m.de} entró a la sala`); } break;
+    case "salio": if (S.sala && m.sala === S.sala.nombre) { quitarMiembro(m.de); mensajeSala(`${m.de} salió de la sala`); } break;
+    case "pantalla": if (S.sala && m.sala === S.sala.nombre) alCambiarPantalla(m.de, d.activo); break;
+    case "pantalla_denegada": cancelarPantalla(`${d.presentador} ya está compartiendo pantalla. Espera a que termine.`); break;
+    case "chat_sala": if (S.sala && m.sala === S.sala.nombre) mensajeSala(d.texto, m.de); break;
     case "aceptar": llamadaAceptada(m.de); break;
     case "rechazar": case "ocupado":
       if (S.llamada && S.llamada.con === m.de) terminarLlamada(m.tipo === "ocupado" ? `${m.de} está en otra llamada` : `${m.de} rechazó la llamada${d.motivo ? " (" + d.motivo + ")" : ""}`, false);
@@ -127,14 +138,21 @@ class Par {
     };
     pc.onicecandidate = ({ candidate }) => candidate && senal({ tipo: "candidato", para: this.nombre, datos: { candidato: candidate.toJSON() } });
     pc.ontrack = (e) => {
+      const flujo0 = e.streams[0] || new MediaStream([e.track]);
+      if (S.sala && S.sala.miembros.has(this.nombre)) {
+        const v = document.querySelector(`.tile[data-u="${CSS.escape(this.nombre)}"] video`);
+        if (v) { v.srcObject = flujo0; v.parentElement.querySelector(".espera")?.remove(); }
+        return;
+      }
       if (!S.llamada || S.llamada.con !== this.nombre) return;
-      const flujo = e.streams[0] || new MediaStream([e.track]);
+      const flujo = flujo0;
       $("videoRemoto").srcObject = flujo; $("sinVideo").classList.add("oculto");
       textoConexion(this);
     };
     pc.onconnectionstatechange = () => {
       const st = pc.connectionState;
       textoConexion(this);
+      if (st === "connected" && S.sala && S.sala.miembros.has(this.nombre)) ajustarBitrate();
       if (st === "failed") aviso(`No se pudo establecer la conexión directa con ${this.nombre} (puede requerir TURN).`, true);
     };
   }
@@ -273,6 +291,7 @@ function mostrarLlamada(texto) {
 async function llamar() {
   const con = S.abierto;
   if (!con || S.llamada) return;
+  if (S.sala) return aviso("Sal de la sala para hacer una llamada individual", true);
   if (!S.usuarios.get(con)?.conectado) return aviso(`${con} no está conectado`, true);
   let local;
   try { local = await obtenerMedios(); } catch (e) { return aviso(e.message, true); }
@@ -397,7 +416,7 @@ function pintarLista() {
   const us = [...S.usuarios.entries()].sort((a, b) => (b[1].conectado - a[1].conectado) || a[0].localeCompare(b[0]));
   const enLinea = us.filter(([, u]) => u.conectado).length;
   $("resumen").textContent = `${enLinea} usuario(s) en línea`;
-  if (!us.length) { $("lista").innerHTML = `<div class="vacio">Aún no hay nadie más conectado.<br>Abre otra ventana (por nodo1 o nodo2) y entra con otro nombre.</div>`; return; }
+  if (!us.length) { $("lista").innerHTML = `<div class="vacio">Aún no hay nadie más conectado.<br>Abre otra ventana (o una de incógnito) y entra con otro nombre.</div>`; return; }
   $("lista").innerHTML = us.map(([n, u]) => {
     const conv = S.conversaciones.get(n) || []; const ult = conv[conv.length - 1];
     const previa = ult ? (ult.tipo === "texto" ? (ult.mio ? "Tú: " : "") + ult.texto : ult.tipo === "archivo" ? "📎 " + ult.nombre : ult.texto) : (u.conectado ? "en línea" : "desconectado");
@@ -417,7 +436,7 @@ function pintarCabecera() {
 }
 function abrirChat(n) {
   S.abierto = n; S.noLeidos.delete(n);
-  $("portada").classList.add("oculto"); $("vistaChat").classList.remove("oculto"); $("contenedor").classList.add("con-chat");
+  $("portada").classList.add("oculto"); $("vistaSala").classList.add("oculto"); $("vistaChat").classList.remove("oculto"); $("contenedor").classList.add("con-chat");
   pintarCabecera();
   $("mensajes").innerHTML = (S.conversaciones.get(n) || []).map(htmlItem).join(""); bajar();
   pintarLista(); $("texto").focus();
@@ -425,6 +444,171 @@ function abrirChat(n) {
 function entrar() {
   $("acceso").classList.add("oculto"); $("app").classList.remove("oculto");
   avatar($("miAvatar"), S.yo); $("miNombre").textContent = S.yo; $("miNodo").textContent = `conectado a ${S.nodo}`;
+}
+
+// ------------------------------------------------------------------ salas: videollamada grupal en malla (RETO)
+function pintarSalas() {
+  const el = $("listaSalas");
+  if (!S.salas.length) { el.innerHTML = `<div class="vacio-mini">No hay salas activas. Crea una con «+ Sala».</div>`; return; }
+  el.innerHTML = S.salas.map((x) => {
+    const nombres = x.miembros.map((m) => m.usuario).join(", ");
+    return `<div class="sala-item ${S.sala && S.sala.nombre === x.sala ? "sel" : ""}" data-sala="${esc(x.sala)}">
+      <div class="avatar sala-av">#</div><div class="info"><b>${esc(x.sala)}</b>
+      <small>${x.miembros.length} participante(s): ${esc(nombres)}${x.presentador ? " · 🖥 " + esc(x.presentador) : ""}</small></div></div>`;
+  }).join("");
+}
+async function unirseSala(nombre) {
+  nombre = nombre.trim().toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9_-]/g, "").slice(0, 24);
+  if (!nombre) return aviso("Nombre de sala inválido", true);
+  if (S.llamada) return aviso("Cuelga la llamada actual antes de entrar a una sala", true);
+  if (S.sala && S.sala.nombre === nombre) return mostrarSala();
+  if (S.sala) salirSala();
+  let local;
+  try { local = await obtenerMedios(); } catch (e) { return aviso(e.message, true); }
+  S.sala = { nombre, local, camara: local.getVideoTracks()[0] || null, miembros: new Map(), presentador: null, pantalla: null };
+  $("mensajesSala").innerHTML = "";
+  mostrarSala(); pintarGrupo();
+  senal({ tipo: "unirse", sala: nombre });
+  mensajeSala(`Entraste a la sala «${nombre}»`);
+}
+function mostrarSala() {
+  S.abierto = null;
+  $("portada").classList.add("oculto"); $("vistaChat").classList.add("oculto"); $("vistaSala").classList.remove("oculto");
+  $("contenedor").classList.add("con-chat");
+  $("salaNombre").textContent = "Sala " + S.sala.nombre;
+  pintarLista(); pintarSalas();
+}
+function agregarMiembro(usuario, nodo) {
+  if (!S.sala || usuario === S.yo || S.sala.miembros.has(usuario)) return;
+  S.sala.miembros.set(usuario, nodo);
+  const p = obtenerPar(usuario);               // una RTCPeerConnection por cada par (malla)
+  p.agregarMedios(S.sala.local);
+  if (S.sala.pantalla) reemplazarVideo(p, S.sala.pantalla);
+}
+function quitarMiembro(usuario) {
+  if (!S.sala || !S.sala.miembros.has(usuario)) return;
+  S.sala.miembros.delete(usuario);
+  if (S.sala.presentador === usuario) S.sala.presentador = null;
+  const p = S.pares.get(usuario); if (p) p.quitarMedios();
+  pintarGrupo(); ajustarBitrate();
+}
+function pintarGrupo() {
+  if (!S.sala) return;
+  const g = $("grupo");
+  const usuarios = [S.yo, ...S.sala.miembros.keys()];
+  // conservar los <video> existentes para no cortar la reproducción
+  for (const t of [...g.children]) if (!usuarios.includes(t.dataset.u)) t.remove();
+  for (const u of usuarios) {
+    if (g.querySelector(`.tile[data-u="${CSS.escape(u)}"]`)) continue;
+    const t = document.createElement("div");
+    t.className = "tile" + (u === S.yo ? " propio" : ""); t.dataset.u = u;
+    const nodo = u === S.yo ? S.nodo : S.sala.miembros.get(u);
+    t.innerHTML = `<video autoplay playsinline ${u === S.yo ? "muted" : ""}></video><span class="etq">${esc(u === S.yo ? u + " (tú)" : u)} · ${esc(nodo || "")}</span>${u === S.yo ? "" : '<div class="espera">Conectando…</div>'}`;
+    if (u === S.yo) t.querySelector("video").srcObject = S.sala.pantalla ? new MediaStream([S.sala.pantalla]) : S.sala.local;
+    else { const p = S.pares.get(u); const r = p && p.pc.getReceivers().map((x) => x.track).filter((x) => x && x.readyState === "live");
+      if (r && r.length) { t.querySelector("video").srcObject = new MediaStream(r); t.querySelector(".espera")?.remove(); } }
+    g.appendChild(t);
+  }
+  // distribución: cuadrícula; quien comparte pantalla ocupa la fila superior completa
+  const n = usuarios.length, pres = S.sala.presentador;
+  for (const t of g.children) { t.classList.toggle("presentando", t.dataset.u === pres); t.classList.toggle("pantalla", t.dataset.u === S.yo && !!S.sala.pantalla); t.style.gridColumn = ""; }
+  if (pres && usuarios.includes(pres)) {
+    const otros = Math.max(1, n - 1);
+    g.style.gridTemplateColumns = `repeat(${otros}, 1fr)`; g.style.gridTemplateRows = n > 1 ? "3fr 1fr" : "1fr";
+    const tp = g.querySelector(`.tile[data-u="${CSS.escape(pres)}"]`); g.prepend(tp); tp.style.gridColumn = "1 / -1";
+  } else {
+    const cols = n <= 1 ? 1 : n <= 4 ? 2 : 3;
+    g.style.gridTemplateColumns = `repeat(${cols}, 1fr)`; g.style.gridTemplateRows = "";
+  }
+  $("salaEstado").textContent = `${n} participante(s) · malla de ${n * (n - 1) / 2} conexión(es)${pres ? " · " + pres + " comparte pantalla" : ""}`;
+}
+async function ajustarBitrate() {
+  // control de ancho de banda: en malla cada uno sube su video n-1 veces
+  if (!S.sala) return;
+  const n = S.sala.miembros.size;
+  const max = S.sala.pantalla ? 1200000 : n <= 1 ? 1000000 : n === 2 ? 600000 : 350000;
+  for (const u of S.sala.miembros.keys()) {
+    const p = S.pares.get(u); if (!p) continue;
+    for (const snd of p.senders) {
+      if (!snd.track || snd.track.kind !== "video") continue;
+      const prm = snd.getParameters(); if (!prm.encodings || !prm.encodings.length) continue;
+      prm.encodings[0].maxBitrate = max;
+      try { await snd.setParameters(prm); } catch (e) { /* aún negociando */ }
+    }
+  }
+}
+function reemplazarVideo(par, pista) {
+  for (const snd of par.senders) if (snd.track && snd.track.kind === "video") snd.replaceTrack(pista).catch(() => {});
+  // si ya se cambió antes, el sender conserva el kind "video"
+  for (const snd of par.pc.getSenders()) if (par.senders.includes(snd) && !snd.track && pista) snd.replaceTrack(pista).catch(() => {});
+}
+async function compartirPantalla() {
+  if (!S.sala) return;
+  if (S.sala.pantalla) return dejarDeCompartir();
+  if (S.sala.presentador && S.sala.presentador !== S.yo) return aviso(`${S.sala.presentador} ya está compartiendo pantalla`, true);
+  let flujo;
+  try { flujo = await navigator.mediaDevices.getDisplayMedia({ video: true }); }   // exige clic del usuario y HTTPS
+  catch (e) { return aviso(e.name === "NotAllowedError" ? "Compartir pantalla cancelado o no permitido" : "No se pudo compartir pantalla: " + e.message, true); }
+  S.sala.pantallaPendiente = flujo.getVideoTracks()[0];
+  S.sala.pantallaPendiente.onended = () => dejarDeCompartir();   // botón "Dejar de compartir" del navegador
+  senal({ tipo: "pantalla_sala", sala: S.sala.nombre, datos: { activo: true } });
+}
+function cancelarPantalla(msg) {
+  if (S.sala && S.sala.pantallaPendiente) { S.sala.pantallaPendiente.stop(); S.sala.pantallaPendiente = null; }
+  aviso(msg, true);
+}
+function alCambiarPantalla(quien, activo) {
+  if (!S.sala) return;
+  S.sala.presentador = activo ? quien : (S.sala.presentador === quien ? null : S.sala.presentador);
+  if (quien === S.yo && activo && S.sala.pantallaPendiente) {
+    S.sala.pantalla = S.sala.pantallaPendiente; S.sala.pantallaPendiente = null;
+    for (const u of S.sala.miembros.keys()) { const p = S.pares.get(u); if (p) reemplazarVideo(p, S.sala.pantalla); }
+    const v = document.querySelector(`.tile[data-u="${CSS.escape(S.yo)}"] video`); if (v) v.srcObject = new MediaStream([S.sala.pantalla]);
+    $("btnPantalla").textContent = "Dejar de compartir";
+    ajustarBitrate();
+  }
+  if (quien !== S.yo) mensajeSala(activo ? `${quien} está compartiendo pantalla` : `${quien} dejó de compartir`);
+  pintarGrupo(); pintarSalas();
+}
+function dejarDeCompartir() {
+  if (!S.sala || !S.sala.pantalla) return;
+  const pantalla = S.sala.pantalla; S.sala.pantalla = null;
+  pantalla.onended = null; pantalla.stop();
+  for (const u of S.sala.miembros.keys()) { const p = S.pares.get(u); if (p && S.sala.camara) reemplazarVideo(p, S.sala.camara); }
+  const v = document.querySelector(`.tile[data-u="${CSS.escape(S.yo)}"] video`); if (v) v.srcObject = S.sala.local;
+  $("btnPantalla").textContent = "Compartir pantalla";
+  senal({ tipo: "pantalla_sala", sala: S.sala.nombre, datos: { activo: false } });
+  ajustarBitrate();
+}
+function salirSala() {
+  const sala = S.sala; if (!sala) return;
+  if (sala.pantalla) dejarDeCompartir();
+  senal({ tipo: "salir", sala: sala.nombre });
+  for (const u of sala.miembros.keys()) { const p = S.pares.get(u); if (p) p.quitarMedios(); }
+  sala.local.getTracks().forEach((t) => t.stop());
+  S.sala = null;
+  $("grupo").innerHTML = ""; $("vistaSala").classList.add("oculto"); $("portada").classList.remove("oculto"); $("contenedor").classList.remove("con-chat");
+  $("btnPantalla").textContent = "Compartir pantalla";
+  $("btnMicSala").classList.remove("apagado"); $("btnCamSala").classList.remove("apagado");
+  pintarSalas();
+}
+function mensajeSala(texto, de) {
+  const el = $("mensajesSala");
+  el.insertAdjacentHTML("beforeend", de
+    ? `<div class="msg ${de === S.yo ? "mio" : ""}"><div class="burbuja"><b>${esc(de)}:</b> ${esc(texto)}<span class="hora">${hora()}</span></div></div>`
+    : `<div class="msg sistema"><span>${esc(texto)} · ${hora()}</span></div>`);
+  el.scrollTop = el.scrollHeight;
+}
+function enviarSala() {
+  const t = $("textoSala").value.trim(); if (!t || !S.sala) return;
+  senal({ tipo: "chat_sala", sala: S.sala.nombre, datos: { texto: t } });
+  $("textoSala").value = ""; mensajeSala(t, S.yo);
+}
+function alternarSala(tipo, boton) {
+  if (!S.sala) return;
+  const pistas = tipo === "audio" ? S.sala.local.getAudioTracks() : S.sala.local.getVideoTracks();
+  if (!pistas.length) return aviso(tipo === "audio" ? "No hay micrófono" : "No hay cámara", true);
+  const activo = !pistas[0].enabled; pistas.forEach((t) => (t.enabled = activo)); boton.classList.toggle("apagado", !activo);
 }
 
 // ------------------------------------------------------------------ eventos
@@ -445,13 +629,25 @@ $("btnMic").onclick = (e) => alternar("audio", e.currentTarget);
 $("btnCam").onclick = (e) => alternar("video", e.currentTarget);
 $("btnAceptar").onclick = aceptar;
 $("btnRechazar").onclick = () => { const de = S.entrante.de; senal({ tipo: "rechazar", para: de }); cerrarModal(); agregarItem(de, sistema(`Rechazaste la llamada de ${de}`)); };
-window.addEventListener("beforeunload", () => { if (S.llamada) senal({ tipo: "colgar", para: S.llamada.con }); });
+window.addEventListener("beforeunload", () => { if (S.llamada) senal({ tipo: "colgar", para: S.llamada.con }); if (S.sala) senal({ tipo: "salir", sala: S.sala.nombre }); });
+$("btnNuevaSala").onclick = () => { $("modalSala").classList.remove("oculto"); $("nombreSala").value = ""; $("nombreSala").focus(); };
+$("btnCancelarSala").onclick = () => $("modalSala").classList.add("oculto");
+$("formSala").onsubmit = (e) => { e.preventDefault(); $("modalSala").classList.add("oculto"); unirseSala($("nombreSala").value); };
+$("listaSalas").onclick = (e) => { const it = e.target.closest(".sala-item"); if (it) unirseSala(it.dataset.sala); };
+$("btnSalirSala").onclick = salirSala;
+$("btnPantalla").onclick = compartirPantalla;
+$("btnMicSala").onclick = (e) => alternarSala("audio", e.currentTarget);
+$("btnCamSala").onclick = (e) => alternarSala("video", e.currentTarget);
+$("btnEnviarSala").onclick = enviarSala;
+$("textoSala").onkeydown = (e) => { if (e.key === "Enter") enviarSala(); };
+$("btnVolverSala").onclick = () => { $("contenedor").classList.remove("con-chat"); };
+try { const n = localStorage.getItem("mensajero_nombre"); if (n) $("nombre").value = n; } catch (e) {}
 
 (async () => {
   try {
     const c = await (await fetch(BASE + "config")).json();
     S.nodo = c.nodo; S.ice = c.iceServers;
-    $("estadoNodo").innerHTML = `<i class="punto ok"></i>Servidor de señalización: ${esc(c.nodo)}`;
+    $("estadoNodo").innerHTML = `<i class="punto ok"></i>Te atenderá el servidor <b>${esc(c.nodo)}</b>, asignado automáticamente`;
   } catch (e) {
     $("estadoNodo").innerHTML = `<i class="punto mal"></i>No se pudo contactar al nodo`;
   }
