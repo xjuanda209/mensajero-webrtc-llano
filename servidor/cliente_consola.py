@@ -4,7 +4,9 @@ Cliente de consola para probar la señalización sin interfaz gráfica.
 
 Uso interactivo:
     python3 cliente_consola.py ws://localhost:8080/ws ana
-    > beto: hola desde nodo1        (mensaje directo a beto)
+    > /con beto                     (desde ahora le escribes a beto)
+    > hola desde nodo1              (va para beto)
+    > caro: hola caro               (mensaje puntual a otra persona)
     > *: hola a todos               (mensaje a todos los usuarios)
     > /usuarios                     (directorio de ambos nodos)
     > /salir
@@ -44,7 +46,9 @@ async def recibir(ws):
 
 async def interactivo(ws):
     loop = asyncio.get_running_loop()
-    print("Escribe 'destino: texto', '/usuarios' o '/salir'.\n> ", end="", flush=True)
+    destino = None
+    print("Comandos: /con <usuario> (fijar a quién le escribes), /usuarios, /salir.\n"
+          "También puedes escribir 'usuario: texto' para un mensaje puntual.\n> ", end="", flush=True)
     while True:
         crudo = await loop.run_in_executor(None, sys.stdin.readline)
         if crudo == "":                      # sin teclado (EOF): solo escuchar
@@ -57,10 +61,18 @@ async def interactivo(ws):
         if linea == "/usuarios":
             await ws.send_json({"tipo": "usuarios"})
             continue
-        if ":" not in linea:
-            print("Formato: destino: texto\n> ", end="", flush=True)
+        if linea.startswith("/con "):
+            destino = linea[5:].strip()
+            print(f"Ahora le escribes a {destino}. Escribe tu mensaje y Enter.\n> ", end="", flush=True)
             continue
-        para, texto = (x.strip() for x in linea.split(":", 1))
+        posible, _, resto = linea.partition(":")
+        if resto and " " not in posible.strip():          # 'beto: hola' -> mensaje puntual
+            para, texto = posible.strip(), resto.strip()
+        elif destino:                                     # texto normal -> al destino fijado
+            para, texto = destino, linea
+        else:
+            print("Primero elige a quién escribir: /con <usuario>  (o usa 'usuario: texto')\n> ", end="", flush=True)
+            continue
         await ws.send_json({"tipo": "chat", "para": para, "datos": {"texto": texto}})
 
 

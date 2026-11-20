@@ -31,10 +31,13 @@ from aiohttp import WSMsgType, web, ClientSession, ClientError
 NODO = os.environ.get("NODO_NOMBRE", socket.gethostname())
 PAR = os.environ.get("NODO_PAR", "")
 PUERTO = int(os.environ.get("PUERTO", "8080"))
-WEB = Path(__file__).with_name("web")
+WEB = Path(os.environ.get("WEB_DIR", Path(__file__).with_name("web")))
+# Servidores ICE que se entregan al navegador (en la nube se agrega el TURN propio).
+ICE = json.loads(os.environ.get("ICE_SERVERS", '[{"urls": "stun:stun.l.google.com:19302"}]'))
 
 # Tipos que se enrutan a un destinatario (señalización WebRTC y chat).
-DIRIGIDOS = {"chat", "oferta", "respuesta", "candidato", "colgar", "pantalla"}
+DIRIGIDOS = {"chat", "oferta", "respuesta", "candidato", "llamada", "aceptar", "rechazar",
+             "colgar", "ocupado", "pantalla"}
 
 logging.basicConfig(level=logging.INFO, format=f"%(asctime)s [{NODO}] %(message)s", datefmt="%H:%M:%S")
 log = logging.getLogger("mensajero")
@@ -136,6 +139,9 @@ async def ws_cliente(request):
             elif tipo in DIRIGIDOS:
                 completo = {**sobre(tipo), **{k: msg.get(k) for k in ("para", "sala", "datos") if k in msg},
                             "de": usuario, "nodo": NODO}
+                if completo.get("para") == usuario:
+                    await enviar_ws(ws, sobre("error", para=usuario, datos={"motivo": "No puedes enviarte mensajes a ti mismo"}))
+                    continue
                 if completo["tipo"] == "chat":
                     log.info("CHAT     %s -> %s: %s", usuario, completo.get("para"),
                              str(completo.get("datos", {}).get("texto", ""))[:80])
@@ -224,6 +230,10 @@ async def salud(request):
                               "usuarios_locales": sorted(locales), "usuarios_remotos": remotos})
 
 
+async def config(request):
+    return web.json_response({"nodo": NODO, "iceServers": ICE})
+
+
 async def indice(request):
     archivo = WEB / "index.html"
     if archivo.exists():
@@ -245,6 +255,7 @@ def crear_app():
     app.router.add_get("/ws", ws_cliente)
     app.router.add_get("/federacion", ws_federacion)
     app.router.add_get("/salud", salud)
+    app.router.add_get("/config", config)
     if WEB.exists():
         app.router.add_static("/static/", WEB)
     app.on_startup.append(al_iniciar)
