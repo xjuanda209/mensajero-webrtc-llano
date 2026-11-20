@@ -91,9 +91,16 @@ Opcional, para evitar la advertencia del certificado: `incus file pull pasarela/
 | 3478/udp | STUN público (local) / coturn (nube, pendiente) | Descubrimiento de candidatos ICE |
 | UDP efímeros | entre navegadores | WebRTC: SRTP (medios) y SCTP/DTLS (datos) |
 
+## Seguridad
+
+- Chat 1:1 cifrado de extremo a extremo: ECDH P-256 + HKDF-SHA-256 → AES-256-GCM (WebCrypto). El servidor solo reenvía texto cifrado. Botón del candado: código de seguridad de 60 cifras para comparar con el contacto.
+- Video, audio y archivos: cifrados por WebRTC (DTLS-SRTP y DTLS/SCTP), van directo entre navegadores.
+- Limitación: el chat de las salas pasa por el servidor sin cifrado E2E (solo TLS hasta la pasarela).
+
 ## Problemas conocidos
 
 - cloud-init tarda 1 a 3 minutos la primera vez (descarga de paquetes); `probar_avance.sh` espera a que termine.
+- Si se corta el WebSocket de señalización, el cliente se reconecta solo a su mismo nodo (con una clave de sesión por pestaña) y vuelve a entrar a la sala; las conexiones P2P de video no se cortan.
 - Si ambos nodos arrancan al mismo tiempo pueden abrirse dos enlaces de federación (uno en cada sentido); el servidor envía cada mensaje por uno solo, así que no hay duplicados.
 
 ## Regenerar los diagramas

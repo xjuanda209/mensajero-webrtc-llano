@@ -81,7 +81,7 @@ Una entrada por sesión de trabajo: fecha, tiempo dedicado, qué se hizo, proble
 **Qué se hizo**
 - RETO, salas en el servidor: `unirse`, `salir`, `miembros`, `entro`, `salio`, `salas`, chat de sala y control de pantalla compartida (un presentador por sala). El estado de las salas se replica entre nodo1 y nodo2 con eventos `sala_evento` por la federación, de modo que una sala puede tener participantes en ambos nodos.
 - RETO, cliente: videollamada grupal en malla (una `RTCPeerConnection` por par, perfect negotiation), cuadrícula que se reorganiza, límite de bitrate según participantes con `RTCRtpSender.setParameters`, pantalla compartida con `getDisplayMedia` + `replaceTrack` y manejo del evento `ended`.
-- Entrada: pantalla de bienvenida sin elegir nodo; Caddy balancea la raíz entre los dos nodos con `lb_policy cookie` (la página y el WebSocket quedan en el mismo nodo) y conmuta si un nodo falla. Las rutas `/nodo1/` y `/nodo2/` se conservan para demostraciones.
+- Entrada: pantalla de bienvenida sin elegir nodo; Caddy balancea la raíz entre los dos nodos con `lb_policy cookie` (luego cambiado a `least_conn`, ver ajuste) y conmuta si un nodo falla. Las rutas `/nodo1/` y `/nodo2/` se conservan para demostraciones.
 - Prueba automática con 4 navegadores (2 en cada nodo): los 4 ven 3 videos remotos (6 conexiones), chat de sala, pantalla compartida visible para todos, segundo presentador rechazado, salidas dinámicas.
 
 **Decisiones**
@@ -90,3 +90,33 @@ Una entrada por sesión de trabajo: fecha, tiempo dedicado, qué se hizo, proble
 
 **Uso de IA**
 - Claude propuso y escribió el primer borrador de las salas y la llamada grupal; se verificó con pruebas automáticas de 4 participantes.
+
+**Ajuste del balanceo (20 nov):** con `lb_policy cookie` todas las pestañas de un mismo navegador compartían la cookie y caían en el mismo nodo, así que en la demo parecía que no balanceaba. Se cambió a `lb_policy least_conn`: cada WebSocket abierto cuenta como conexión activa y cada usuario nuevo va al nodo con menos usuarios. El cliente toma el nombre del nodo del mensaje `bienvenida` (el nodo real que atiende su WebSocket). Prueba: 6 pestañas del mismo navegador quedaron repartidas 3 en nodo1 y 3 en nodo2.
+
+**Ajuste de reconexión (20 nov):** en la prueba real con 4 personas, a un participante le apareció "Se perdió la conexión con el servidor de señalización" y la sala quedó mostrando 3. Causa: al caerse el WebSocket el servidor lo sacaba de la sala y, al reintentar, el balanceo podía mandarlo al otro nodo o el nombre seguía "en uso" por la sesión vieja. Solución: (1) cada pestaña genera una clave de sesión y la envía en `registro`; si llega la misma clave para un nombre ya conectado, el servidor reemplaza la conexión vieja sin sacarlo de la sala (log `RECONEXION`); (2) el cliente reintenta cada 2 s contra **su mismo nodo** (`/nodoX/ws`) y, si falla 3 veces, vuelve a la entrada balanceada; (3) al recibir `bienvenida` reenvía `unirse` a la sala en la que estaba. Prueba: 4 navegadores repartidos 2/2 en la sala, se cortó el WebSocket de dos participantes (uno en cada nodo): ambos volvieron solos, los 4 siguieron viendo 3 videos y el chat de sala funcionó. También se comprobó que otra pestaña con el mismo nombre pero sin la clave sigue siendo rechazada.
+
+**Ajuste de robustez (20 nov, prueba con 4 personas):** se observaron tres fallas intermitentes y se corrigieron:
+1. *Un participante queda solo en la sala mientras los demás siguen ahí; mensajes que llegan tarde.* Causa: se cortaba un momento el enlace de federación nodo1↔nodo2 (VM con poca CPU) y cada nodo sacaba de inmediato a todos los usuarios del otro nodo de las salas; al volver el enlace la sala se re-sincronizaba en el servidor pero los clientes no se enteraban. Solución: periodo de gracia de 20 s antes de dar por perdidos a los remotos, cola de mensajes durante el corte que se reenvía al volver, conciliación al recibir `hola_nodo` (avisa `entro`/`salio` solo de lo que realmente cambió) y heartbeat de federación de 30 s. En el cliente, `conciliarSala()` compara la sala local con la lista del servidor y agrega, quita o vuelve a entrar si no coinciden. Prueba con un proxy entre nodos que se apaga: corte de 6 s → nadie sale de la sala y el mensaje enviado durante el corte llega; corte de 30 s → los remotos se retiran y al volver el enlace la sala se reconstruye sola con los 4 videos.
+2. *Video congelado entre dos participantes al entrar varios a la vez.* Causa: en el choque de ofertas (glare) a veces se perdían los candidatos ICE y la conexión quedaba en estado `new`. Solución: vigilante por par que, si a los 6 s no está `connected`, hace `restartIce()` (solo el lado impolite), y reinicio ICE automático en `disconnected`/`failed`.
+3. *Caída del WebSocket de un usuario* (ya corregido con la clave de sesión).
+
+---
+
+## Sesión 5 — 20 de noviembre de 2026 (fase 4: cifrado, interfaz y robustez)
+
+**Tiempo dedicado:** _(completar)_ h
+
+**Qué se hizo**
+- *Chat cifrado de extremo a extremo (1:1).* Cada pestaña genera un par de claves ECDH P-256 con WebCrypto (la privada no es exportable). Las claves públicas se intercambian con el mensaje `clave` a través del servidor; cada lado deriva la misma clave AES-256-GCM con ECDH + HKDF-SHA-256. Los mensajes viajan como `{cifrado, iv}` con datos adicionales `emisor>receptor`, y el servidor solo registra `[cifrado E2E, N car.]`. Código de seguridad de 12 grupos de 5 cifras (SHA-256 de ambas claves públicas) para detectar un intermediario; se puede marcar como verificado y avisa si la clave del contacto cambia. Si el otro extremo no soporta cifrado (cliente de consola), se envía en claro y se avisa. El chat de sala sigue pasando por el servidor sin cifrado E2E (limitación documentada); medios y archivos ya van cifrados por DTLS-SRTP / DTLS.
+- *Llamada de voz:* botón de teléfono, solo audio, vista con avatar y cronómetro.
+- *Archivos:* miniatura de imágenes con visor a pantalla completa, vista previa de PDF, reproductor de video/audio, ficha con tipo y tamaño, botón de guardar, envío de varios archivos a la vez y botón «Reintentar» si un envío falla (antes se quedaba en "Esperando confirmación").
+- *Bienvenida:* portada con las cuatro funciones principales y formulario de entrada.
+- *Ventana aparte para la cámara:* botón «Ventana aparte» en la llamada y en la sala. Con la API Document Picture-in-Picture (Chrome y Edge) la videollamada se mueve a una ventana flotante que queda encima de otras aplicaciones, con sus controles; en la página queda «Traer de vuelta». En otros navegadores se usa el Picture-in-Picture estándar del video.
+
+**Errores encontrados en pruebas con 4 personas y cómo se corrigieron**
+- *Cerrar la ventana sin "Salir de la sala" dejaba a los demás trabados.* Ahora `pagehide` avisa al servidor, cierra las RTCPeerConnection y el WebSocket; además, al recibir la presencia "desconectado" se saca al usuario de la sala aunque se pierda el aviso `salio`.
+- *Videos en negro de todos:* si la cámara se cae (otra ventana del mismo PC la libera o el controlador se reinicia) se vuelve a pedir y se reemplaza la pista con `replaceTrack` en todas las conexiones.
+- *Video congelado entre dos personas tras salir y volver a entrar:* se diagnosticó con `getStats()` que una conexión quedaba en `new` sin candidatos ICE locales. Recuperación en dos pasos: `restartIce()` y, si no basta, se rehace la RTCPeerConnection (la oferta va con `nueva:true` para que el otro lado también la rehaga). En 6 repeticiones del escenario salir/cerrar/volver, una se congeló y se recuperó sola.
+
+**Uso de IA**
+- Claude escribió el cifrado, la interfaz nueva y las correcciones; se verificaron con pruebas automáticas (Playwright) y en el log del servidor se comprobó que el texto del chat ya no es legible.

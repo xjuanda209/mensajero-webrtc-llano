@@ -24,7 +24,11 @@ from aiohttp import ClientSession, WSMsgType
 
 def mostrar(msg):
     tipo, de, datos = msg.get("tipo"), msg.get("de"), msg.get("datos", {})
-    if tipo == "chat":
+    if tipo == "clave":          # la consola no implementa el cifrado E2E: el navegador enviará sin cifrar
+        return
+    if tipo == "chat" and datos.get("cifrado"):
+        print(f"\n[{msg.get('nodo')}] {de}: (mensaje cifrado de extremo a extremo; la consola no puede leerlo)")
+    elif tipo == "chat":
         print(f"\n[{msg.get('nodo')}] {de}: {datos.get('texto')}")
     elif tipo == "presencia":
         print(f"\n* {de} {datos.get('estado')} (nodo {datos.get('nodo')})")

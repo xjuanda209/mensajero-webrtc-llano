@@ -37,7 +37,7 @@ ICE = json.loads(os.environ.get("ICE_SERVERS", '[{"urls": "stun:stun.l.google.co
 
 # Tipos que se enrutan a un destinatario (señalización WebRTC y chat).
 DIRIGIDOS = {"chat", "oferta", "respuesta", "candidato", "llamada", "aceptar", "rechazar",
-             "colgar", "ocupado"}
+             "colgar", "ocupado", "clave"}   # "clave": intercambio de claves públicas ECDH para el chat cifrado
 
 logging.basicConfig(level=logging.INFO, format=f"%(asctime)s [{NODO}] %(message)s", datefmt="%H:%M:%S")
 log = logging.getLogger("mensajero")
@@ -47,6 +47,10 @@ remotos: dict[str, str] = {}                      # usuario -> nombre del nodo d
 enlaces: set = set()                              # WebSockets abiertos hacia/desde el otro nodo
 salas: dict[str, dict[str, str]] = {}             # sala -> {usuario: nodo}  (estado replicado en ambos nodos)
 presentador: dict[str, str] = {}                  # sala -> usuario que comparte pantalla
+claves: dict[str, str] = {}                       # usuario -> clave de sesión (permite reconectar con el mismo nombre)
+pendientes: list = []                             # mensajes para el otro nodo mientras el enlace está caído
+GRACIA = 20                                       # s que se espera a que vuelva el enlace antes de dar por perdidos a los remotos
+purga = None                                      # tarea programada que limpia a los remotos si el enlace no vuelve
 
 
 def sobre(tipo, de=None, para=None, datos=None, sala=None):
@@ -73,6 +77,9 @@ async def enviar_a_par(msg):
     for ws in list(enlaces):
         if not ws.closed and await enviar_ws(ws, msg):
             return True
+    if remotos and len(pendientes) < 1000:    # enlace caído pero aún en periodo de gracia: guardar y reenviar al volver
+        pendientes.append(msg)
+        return True
     return False
 
 
@@ -176,11 +183,22 @@ async def ws_cliente(request):
 
             if tipo == "registro":
                 nombre = str(msg.get("de", "")).strip()[:32]
+                clave = str((msg.get("datos") or {}).get("clave", ""))[:64]
+                anterior = locales.get(nombre)
+                if anterior is not None and clave and claves.get(nombre) == clave:
+                    # Reconexión del mismo navegador: reemplaza la sesión vieja sin sacarlo de sus salas.
+                    usuario = nombre
+                    locales[usuario] = ws
+                    await anterior.close()
+                    log.info("RECONEXION %s desde %s", usuario, ip)
+                    await enviar_ws(ws, sobre("bienvenida", para=usuario, datos={"usuarios": directorio(), "salas": resumen_salas()}))
+                    continue
                 if not nombre or nombre in locales or nombre in remotos:
                     await enviar_ws(ws, sobre("error", datos={"motivo": "Nombre vacío o en uso"}))
                     continue
                 usuario = nombre
                 locales[usuario] = ws
+                claves[usuario] = clave
                 log.info("REGISTRO %s desde %s", usuario, ip)
                 await enviar_ws(ws, sobre("bienvenida", para=usuario, datos={"usuarios": directorio(), "salas": resumen_salas()}))
                 presencia = sobre("presencia", de=usuario, datos={"estado": "conectado", "nodo": NODO})
@@ -237,8 +255,10 @@ async def ws_cliente(request):
                     await enviar_ws(ws, sobre("error", para=usuario, datos={"motivo": "No puedes enviarte mensajes a ti mismo"}))
                     continue
                 if completo["tipo"] == "chat":
-                    log.info("CHAT     %s -> %s: %s", usuario, completo.get("para"),
-                             str(completo.get("datos", {}).get("texto", ""))[:80])
+                    d = completo.get("datos") or {}
+                    # Con cifrado de extremo a extremo el servidor solo ve texto cifrado: no puede leerlo.
+                    contenido = f"[cifrado E2E, {len(str(d.get('cifrado', '')))} car. base64]" if d.get("cifrado") else str(d.get("texto", ""))[:80]
+                    log.info("CHAT     %s -> %s: %s", usuario, completo.get("para"), contenido)
                 if not await entregar(completo):
                     await enviar_ws(ws, sobre("error", para=usuario,
                                               datos={"motivo": f"Usuario '{completo.get('para')}' no conectado"}))
@@ -249,6 +269,7 @@ async def ws_cliente(request):
             for sala in [n for n, m in list(salas.items()) if usuario in m]:
                 await salir_de_sala(usuario, sala)
             del locales[usuario]
+            claves.pop(usuario, None)
             log.info("SALIDA   %s", usuario)
             presencia = sobre("presencia", de=usuario, datos={"estado": "desconectado", "nodo": NODO})
             await avisar_locales(presencia)
@@ -258,6 +279,7 @@ async def ws_cliente(request):
 
 # ---------------------------------------------------------------- federación entre nodos
 async def procesar_federacion(ws, origen):
+    global purga
     enlaces.add(ws)
     log.info("ENLACE   abierto con %s (%d enlace/s)", origen, len(enlaces))
     salas_locales = {n: [u for u, nd in m.items() if nd == NODO] for n, m in salas.items()}
@@ -270,7 +292,12 @@ async def procesar_federacion(ws, origen):
             msg = json.loads(m.data)
             tipo, nodo_par = msg.get("tipo"), msg.get("nodo")
             if tipo == "hola_nodo":
-                for u in msg["datos"].get("usuarios", []):
+                if purga:                                   # el enlace volvió dentro del periodo de gracia
+                    purga.cancel(); purga = None
+                vivos = set(msg["datos"].get("usuarios", []))
+                for u in [u for u in remotos if u not in vivos]:   # remotos que ya no existen en el otro nodo
+                    await olvidar_remoto(u)
+                for u in vivos:
                     remotos[u] = nodo_par
                 log.info("ENLACE   %s tiene %d usuario/s: %s", nodo_par, len(msg["datos"]["usuarios"]),
                          ", ".join(msg["datos"]["usuarios"]) or "-")
@@ -278,7 +305,18 @@ async def procesar_federacion(ws, origen):
                     await avisar_locales(sobre("presencia", de=u, datos={"estado": "conectado", "nodo": nodo_par}))
                 for sala, miembros in msg["datos"].get("salas", {}).items():
                     for u in miembros:
+                        nuevo = u not in salas.get(sala, {})
                         aplicar_evento_sala("entro", sala, u, nodo_par)
+                        if nuevo:                           # avisar a los miembros locales para que lo conecten
+                            for miembro in [x for x in salas[sala] if x in locales]:
+                                await enviar_ws(locales[miembro], sobre("entro", de=u, para=miembro, sala=sala, datos={"nodo": nodo_par}))
+                for sala in list(salas):                    # quien ya no está en esa sala del otro nodo, sale
+                    for u in [u for u, nd in list(salas.get(sala, {}).items()) if nd == nodo_par and u not in msg["datos"].get("salas", {}).get(sala, [])]:
+                        await sacar_remoto_de_sala(u, sala)
+                if pendientes:
+                    log.info("ENLACE   reenviando %d mensaje/s guardados", len(pendientes))
+                    while pendientes:
+                        await enviar_ws(ws, pendientes.pop(0))
                 for sala, u in msg["datos"].get("presentador", {}).items():
                     aplicar_evento_sala("pantalla_on", sala, u, nodo_par)
                 await publicar_salas()
@@ -301,20 +339,42 @@ async def procesar_federacion(ws, origen):
     finally:
         enlaces.discard(ws)
         log.info("ENLACE   cerrado con %s", origen)
-        if not enlaces:
-            for u in list(remotos):
-                remotos.pop(u)
-                for sala in [n for n, m in list(salas.items()) if u in m]:
-                    for miembro in salas[sala]:
-                        if miembro in locales:
-                            await enviar_ws(locales[miembro], sobre("salio", de=u, para=miembro, sala=sala))
-                    aplicar_evento_sala("salio", sala, u, "?")
-                await avisar_locales(sobre("presencia", de=u, datos={"estado": "desconectado", "nodo": "?"}))
-            await publicar_salas()
+        if not enlaces and remotos:
+            # No se saca a nadie de inmediato: un corte breve (CPU, red) no debe romper las salas.
+            if purga:
+                purga.cancel()
+            purga = asyncio.create_task(purgar_remotos())
+
+
+async def sacar_remoto_de_sala(u, sala):
+    for miembro in [x for x in salas.get(sala, {}) if x in locales]:
+        await enviar_ws(locales[miembro], sobre("salio", de=u, para=miembro, sala=sala))
+    aplicar_evento_sala("salio", sala, u, "?")
+
+
+async def olvidar_remoto(u):
+    remotos.pop(u, None)
+    for sala in [n for n, m in list(salas.items()) if u in m]:
+        await sacar_remoto_de_sala(u, sala)
+    await avisar_locales(sobre("presencia", de=u, datos={"estado": "desconectado", "nodo": "?"}))
+
+
+async def purgar_remotos():
+    """Si el enlace no vuelve en GRACIA segundos, se da por perdidos a los usuarios del otro nodo."""
+    global purga
+    await asyncio.sleep(GRACIA)
+    purga = None
+    if enlaces:
+        return
+    log.info("ENLACE   no volvió en %d s: se retiran %d usuario/s remotos", GRACIA, len(remotos))
+    pendientes.clear()
+    for u in list(remotos):
+        await olvidar_remoto(u)
+    await publicar_salas()
 
 
 async def ws_federacion(request):
-    ws = web.WebSocketResponse(heartbeat=20)
+    ws = web.WebSocketResponse(heartbeat=30)
     await ws.prepare(request)
     await procesar_federacion(ws, f"{request.remote} (entrante)")
     return ws
@@ -331,7 +391,7 @@ async def conectar_par(app):
                 await asyncio.sleep(3)
                 continue
             try:
-                async with sesion.ws_connect(PAR, heartbeat=20) as ws:
+                async with sesion.ws_connect(PAR, heartbeat=30) as ws:
                     await procesar_federacion(ws, f"{PAR} (saliente)")
             except (ClientError, OSError) as e:
                 log.info("ENLACE   no se pudo conectar a %s (%s); reintento en 3 s", PAR, type(e).__name__)

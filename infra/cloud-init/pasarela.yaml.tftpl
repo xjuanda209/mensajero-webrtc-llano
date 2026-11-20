@@ -26,11 +26,12 @@ write_files:
         handle_path /nodo2/* {
           reverse_proxy nodo2.incus:${puerto}
         }
-        # Entrada principal: balanceo entre los dos nodos. La cookie mantiene a cada
-        # navegador en el mismo nodo (pagina y WebSocket); si un nodo cae, se usa el otro.
+        # Entrada principal: balanceo entre los dos nodos por "menos conexiones".
+        # Cada WebSocket abierto cuenta como conexion activa, asi que cada usuario nuevo
+        # va al nodo con menos usuarios. Si un nodo cae, se usa el otro.
         handle {
           reverse_proxy nodo1.incus:${puerto} nodo2.incus:${puerto} {
-            lb_policy cookie mensajero_nodo
+            lb_policy least_conn
             lb_try_duration 3s
             fail_duration 30s
           }

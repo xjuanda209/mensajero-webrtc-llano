@@ -7,19 +7,31 @@
 <link rel="stylesheet" href="static/estilos.css">
 </head>
 <body>
-<div class="franja"></div>
+<div class="franja" id="franja"></div>
 
 <!-- ================= ACCESO ================= -->
 <section id="acceso" class="oculto">
-  <form class="tarjeta bienvenida" id="formAcceso" autocomplete="off">
-    <div class="logo-grande"><svg width="40" height="40" viewBox="0 0 24 24" fill="currentColor"><path d="M17 10.5V7a1 1 0 00-1-1H4a1 1 0 00-1 1v10a1 1 0 001 1h12a1 1 0 001-1v-3.5l4 4v-11l-4 4z"/></svg></div>
-    <h1>Bienvenido a Mensajero WebRTC</h1>
-    <p class="sub">Mensajes, videollamadas, salas de hasta 4 personas y archivos que viajan directo entre navegadores.</p>
-    <input id="nombre" maxlength="24" required autofocus placeholder="¿Cómo te llamas?">
-    <button class="boton" type="submit">Comenzar</button>
-    <div class="error-acceso" id="errorAcceso"></div>
-    <div class="estado-srv"><span id="estadoNodo"><i class="punto"></i>Conectando…</span></div>
-  </form>
+  <div class="bienvenida-caja">
+    <div class="hero">
+      <div class="marca-b"><div class="logo-b"><svg width="26" height="26" viewBox="0 0 24 24" fill="currentColor"><path d="M17 10.5V7a1 1 0 00-1-1H4a1 1 0 00-1 1v10a1 1 0 001 1h12a1 1 0 001-1v-3.5l4 4v-11l-4 4z"/></svg></div><span>Mensajero WebRTC</span></div>
+      <h1>Habla, mira y comparte.<br><em>Directo de navegador a navegador.</em></h1>
+      <p>Sin instalar nada y sin crear cuenta. El servidor solo presenta a las personas: tus llamadas y archivos viajan cifrados entre los navegadores.</p>
+      <ul class="rasgos">
+        <li><b class="ic"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M17 9h-1V7a4 4 0 10-8 0v2H7a2 2 0 00-2 2v9a2 2 0 002 2h10a2 2 0 002-2v-9a2 2 0 00-2-2zm-7-2a2 2 0 114 0v2h-4V7z"/></svg></b><span><strong>Chat cifrado de extremo a extremo</strong>con código de seguridad para verificar</span></li>
+        <li><b class="ic"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M17 10.5V7a1 1 0 00-1-1H4a1 1 0 00-1 1v10a1 1 0 001 1h12a1 1 0 001-1v-3.5l4 4v-11l-4 4z"/></svg></b><span><strong>Videollamadas y llamadas de voz</strong>conexión directa P2P</span></li>
+        <li><b class="ic"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M16 11a3 3 0 100-6 3 3 0 000 6zm-8 0a3 3 0 100-6 3 3 0 000 6zm0 2c-2.3 0-7 1.2-7 3.5V19h14v-2.5C15 14.2 10.3 13 8 13zm8 0c-.3 0-.6 0-1 .1 1.2.8 2 2 2 3.4V19h6v-2.5c0-2.3-4.7-3.5-7-3.5z"/></svg></b><span><strong>Salas de hasta 4 personas</strong>con pantalla compartida</span></li>
+        <li><b class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M21.4 11.1l-9.2 9.2a6 6 0 01-8.5-8.5l9.2-9.2a4 4 0 015.7 5.7l-9.2 9.2a2 2 0 01-2.8-2.8l8.5-8.5"/></svg></b><span><strong>Fotos y archivos</strong>con vista previa y verificación de integridad</span></li>
+      </ul>
+    </div>
+    <form class="tarjeta bienvenida" id="formAcceso" autocomplete="off">
+      <h2>Entrar</h2>
+      <p class="sub">Elige el nombre con el que te verán los demás.</p>
+      <input id="nombre" maxlength="24" required autofocus placeholder="Tu nombre">
+      <button class="boton" type="submit">Comenzar</button>
+      <div class="error-acceso" id="errorAcceso"></div>
+      <div class="estado-srv"><span id="estadoNodo"><i class="punto"></i>Conectando…</span></div>
+    </form>
+  </div>
 </section>
 
 <!-- ================= APLICACION ================= -->
@@ -51,6 +63,12 @@
           <button class="icono-btn volver" id="btnVolver" title="Volver">&#8249;</button>
           <div class="avatar" id="chatAvatar"></div>
           <div class="quien"><b id="chatNombre"></b><small id="chatEstado"></small></div>
+          <button class="icono-btn" id="btnSeguridad" title="Cifrado y código de seguridad">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M17 9h-1V7a4 4 0 10-8 0v2H7a2 2 0 00-2 2v9a2 2 0 002 2h10a2 2 0 002-2v-9a2 2 0 00-2-2zm-7-2a2 2 0 114 0v2h-4V7z"/></svg>
+          </button>
+          <button class="icono-btn" id="btnVoz" title="Llamada de voz">
+            <svg width="21" height="21" viewBox="0 0 24 24" fill="currentColor"><path d="M6.6 10.8a15.2 15.2 0 006.6 6.6l2.2-2.2a1 1 0 011-.25 11.4 11.4 0 003.6.57 1 1 0 011 1V20a1 1 0 01-1 1A17 17 0 013 4a1 1 0 011-1h3.5a1 1 0 011 1c0 1.25.2 2.45.57 3.57a1 1 0 01-.25 1z"/></svg>
+          </button>
           <button class="icono-btn" id="btnLlamar" title="Videollamada">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M17 10.5V7a1 1 0 00-1-1H4a1 1 0 00-1 1v10a1 1 0 001 1h12a1 1 0 001-1v-3.5l4 4v-11l-4 4z"/></svg>
           </button>
@@ -60,11 +78,13 @@
         <div class="llamada oculto" id="llamada">
           <video id="videoRemoto" autoplay playsinline></video>
           <div class="sin-video oculto" id="sinVideo">Esperando video…</div>
+          <div class="vista-voz"><div class="avatar grande" id="vozAvatar"></div><b id="vozNombre"></b><small>Llamada de voz cifrada</small></div>
           <video id="videoLocal" autoplay playsinline muted></video>
           <div class="estado-llamada" id="estadoLlamada">Llamando…</div>
           <div class="controles">
             <button class="ctl" id="btnMic" title="Silenciar micrófono">Micrófono</button>
             <button class="ctl" id="btnCam" title="Apagar cámara">Cámara</button>
+            <button class="ctl" id="btnFlotante" title="Abrir la cámara en una ventana aparte, encima de las demás">Ventana aparte</button>
             <button class="ctl rojo" id="btnColgar" title="Colgar">Colgar</button>
           </div>
         </div>
@@ -74,7 +94,7 @@
           <button class="icono-btn" id="btnAdjuntar" title="Enviar archivo (cualquier tipo)">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21.4 11.1l-9.2 9.2a6 6 0 01-8.5-8.5l9.2-9.2a4 4 0 015.7 5.7l-9.2 9.2a2 2 0 01-2.8-2.8l8.5-8.5"/></svg>
           </button>
-          <input type="file" id="archivo" class="oculto">
+          <input type="file" id="archivo" class="oculto" multiple>
           <input id="texto" class="caja" placeholder="Escribe un mensaje" autocomplete="off">
           <button class="icono-btn verde" id="btnEnviar" title="Enviar">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M2.5 20.5L22 12 2.5 3.5l.01 6.6L16 12 2.51 13.9z"/></svg>
@@ -88,12 +108,15 @@
           <div class="avatar sala-av">#</div>
           <div class="quien"><b id="salaNombre"></b><small id="salaEstado"></small></div>
         </div>
+        <div class="bloque-sala" id="bloqueSala">
         <div class="grupo" id="grupo"></div>
         <div class="barra-sala">
           <button class="ctl oscuro" id="btnMicSala">Micrófono</button>
           <button class="ctl oscuro" id="btnCamSala">Cámara</button>
           <button class="ctl oscuro" id="btnPantalla">Compartir pantalla</button>
+          <button class="ctl oscuro" id="btnFlotanteSala" title="Abrir la sala en una ventana aparte, encima de las demás">Ventana aparte</button>
           <button class="ctl rojo" id="btnSalirSala">Salir de la sala</button>
+        </div>
         </div>
         <div class="mensajes chat-sala" id="mensajesSala"></div>
         <div class="redactor">
@@ -129,6 +152,30 @@
       <button class="btn verde" id="btnAceptar">Contestar</button>
     </div>
   </div>
+</div>
+<!-- Código de seguridad -->
+<div class="fondo-modal oculto" id="modalSeguridad">
+  <div class="modal seguridad">
+    <div class="candado-g"><svg width="30" height="30" viewBox="0 0 24 24" fill="currentColor"><path d="M17 9h-1V7a4 4 0 10-8 0v2H7a2 2 0 00-2 2v9a2 2 0 002 2h10a2 2 0 002-2v-9a2 2 0 00-2-2zm-7-2a2 2 0 114 0v2h-4V7z"/></svg></div>
+    <h3 id="segTitulo"></h3>
+    <div class="codigo" id="segCodigo"></div>
+    <p class="explica">Los mensajes de este chat se cifran en tu navegador con AES-256-GCM y una clave acordada con ECDH. Ni el servidor puede leerlos. Compara estos números con la otra persona (en voz alta o en persona): si son iguales, nadie intercepta la conversación.</p>
+    <div class="explica" id="segEstado"></div>
+    <div class="acciones">
+      <button class="btn" id="segCerrar">Cerrar</button>
+      <button class="btn verde" id="segVerificar">Marcar como verificado</button>
+    </div>
+  </div>
+</div>
+
+<!-- Visor de imágenes y PDF -->
+<div class="visor oculto" id="visor">
+  <div class="visor-barra">
+    <div><b id="visorNombre"></b><small id="visorInfo"></small></div>
+    <a class="icono-btn claro" id="visorBajar" title="Guardar"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 4v11m0 0l-4-4m4 4l4-4M5 20h14"/></svg></a>
+    <button class="icono-btn claro" id="visorCerrar" title="Cerrar">&times;</button>
+  </div>
+  <div class="visor-cuerpo" id="visorCuerpo"></div>
 </div>
 <div id="aviso" class="oculto"></div>
 
