@@ -6,7 +6,7 @@ Una entrada por sesión de trabajo: fecha, tiempo dedicado, qué se hizo, proble
 
 ## Sesión 1 — 19 de noviembre de 2026
 
-**Tiempo dedicado:** 3h
+**Tiempo dedicado:** _(completar)_ h
 
 **Qué se hizo**
 - Lectura de la guía del laboratorio y planeación del cronograma.
@@ -29,7 +29,7 @@ Una entrada por sesión de trabajo: fecha, tiempo dedicado, qué se hizo, proble
 
 ## Sesión 2 — 19 de noviembre de 2026 (código del primer avance)
 
-**Tiempo dedicado:** 5 h
+**Tiempo dedicado:** _(completar)_ h
 
 **Qué se hizo**
 - Servidor de señalización `servidor/servidor.py` (Python + aiohttp): WebSocket de clientes (`/ws`), enlace entre nodos (`/federacion`), estado (`/salud`). Registro de usuarios, presencia, chat y reenvío de mensajes dirigidos (`oferta`, `respuesta`, `candidato`) al otro nodo.
@@ -45,3 +45,27 @@ Una entrada por sesión de trabajo: fecha, tiempo dedicado, qué se hizo, proble
 
 **Uso de IA**
 - Se usó Claude para generar un primer borrador del servidor, del cliente de consola y de los archivos de Terraform; el código se revisó, se probó y se ajustó.
+
+**Ajuste tras la primera prueba en Incus (19 nov):** el formato `destino: texto` resultó incómodo y un usuario podía enviarse mensajes a sí mismo. Se agregó el comando `/con <usuario>` al cliente de consola y el servidor ahora rechaza mensajes dirigidos al mismo remitente.
+
+---
+
+## Sesión 3 — 19 de noviembre de 2026 (fase 3: interfaz, medios y archivos)
+
+**Tiempo dedicado:** _(completar)_ h
+
+**Qué se hizo**
+- Interfaz web (`servidor/web/`): ingreso con nombre, directorio con presencia y nodo de cada usuario, chat, videollamada con contestar/rechazar, silenciar micrófono, apagar cámara y colgar.
+- Conexión entre pares con el patrón *perfect negotiation* (rol polite/impolite según el nombre) y un `RTCDataChannel` negociado (id 0) por contacto.
+- Archivos de cualquier tipo por fragmentos de 16 KiB con control de flujo (`bufferedAmount` > 1 MiB → esperar `bufferedamountlow`), barra de progreso y verificación SHA-256 en el receptor; vista previa de imagen, audio y video.
+- Manejo de errores visible: permiso de cámara negado, contacto desconectado, archivo interrumpido, llamada sin respuesta, ocupado, pérdida del servidor.
+- Servidor: nuevos tipos dirigidos (`llamada`, `aceptar`, `rechazar`, `colgar`, `ocupado`) y `/config` con los servidores ICE.
+- Terraform: instancia `pasarela` con Caddy (HTTPS con CA interna) publicada con dispositivos proxy de Incus en los puertos 443 y 80; los nodos reciben la interfaz por cloud-init.
+- Pruebas automáticas en navegador (Playwright con cámara simulada) entre un usuario en nodo1 y otro en nodo2: chat, imagen, archivo de 21 MB íntegro, videollamada conectada P2P, colgar, archivo de 40 MB interrumpido, desconexión durante la llamada y permiso negado. También a través de Caddy por HTTPS.
+
+**Problemas y soluciones**
+- El indicador de la llamada se quedaba en «Conectando…» porque la conexión ya estaba establecida por el canal de datos → se actualiza el texto según `connectionState` al iniciar la llamada.
+- El mensaje de archivo interrumpido mostraba el error técnico del navegador → se cambió por «el otro extremo cerró la conexión».
+
+**Uso de IA**
+- Claude generó el primer borrador de la interfaz y de la lógica WebRTC; se revisó y se probó con pruebas automáticas.

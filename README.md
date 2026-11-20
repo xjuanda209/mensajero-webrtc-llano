@@ -9,8 +9,9 @@ Mensajero web con chat, videollamada, envío de archivos y videollamada grupal c
 | Fase | Contenido | Estado |
 |---|---|---|
 | 1. Investigación | `docs/informe_investigacion.pdf`, diagramas en `docs/uml/` | Entregado |
-| 2. Primer avance (22 nov) | Dos nodos reproducibles con Terraform, señalización y mensajes por consola | En curso |
-| 3. Interfaz, medios y archivos | Chat, videollamada, archivos, RETO, despliegue en Azure | Pendiente |
+| 2. Primer avance (22 nov) | Dos nodos reproducibles con Terraform, señalización y mensajes por consola | Hecho |
+| 3. Interfaz, medios y archivos | Interfaz web, chat, videollamada, archivos con progreso y SHA-256, pasarela HTTPS | Hecho (local) |
+| RETO y nube | Videollamada grupal, pantalla compartida, despliegue en Azure con TURN | Pendiente |
 
 ## Estructura
 
@@ -21,11 +22,15 @@ docs/
 servidor/
   servidor.py                 servidor de señalización (aiohttp): /ws, /federacion, /salud
   cliente_consola.py          cliente de prueba por consola
+  web/                        interfaz web (index.html, estilos.css, app.js)
 infra/
   main.tf, variables.tf ...   Terraform: red Incus, perfil y los dos nodos
-  cloud-init/nodo.yaml.tftpl  instala Python + aiohttp y crea el servicio systemd
+  cloud-init/nodo.yaml.tftpl  instala Python + aiohttp, copia servidor e interfaz y crea el servicio systemd
+  cloud-init/pasarela.yaml.tftpl  Caddy: proxy HTTPS hacia nodo1.incus y nodo2.incus
+  pasarela/index.html         portada para elegir nodo
 scripts/
   probar_avance.sh            demostración del primer avance (DNS, servicio, mensajes, logs)
+  actualizar_nodos.sh         copia servidor e interfaz a los nodos sin recrearlos
 BITACORA.md                   registro de cada sesión de trabajo
 ```
 
@@ -54,7 +59,7 @@ incus exec nodo1 -- python3 /opt/mensajero/cliente_consola.py ws://localhost:808
 incus exec nodo2 -- python3 /opt/mensajero/cliente_consola.py ws://localhost:8080/ws beto
 ```
 
-En cada cliente se escribe `destino: texto` (por ejemplo `ana: hola`), `/usuarios` o `/salir`. Para ver los logs en vivo:
+En cada cliente: `/con beto` fija el destinatario y luego se escribe normal; también sirve `beto: hola` para un mensaje puntual, `*: hola` para todos, `/usuarios` y `/salir`. Para ver los logs en vivo:
 
 ```
 incus exec nodo1 -- journalctl -u mensajero -f
@@ -62,12 +67,27 @@ incus exec nodo1 -- journalctl -u mensajero -f
 
 Para actualizar el código de un nodo: `terraform apply -replace='incus_instance.nodo["nodo1"]'`. Para borrar todo: `terraform destroy`.
 
+## Usar el mensajero (interfaz web)
+
+Después de `terraform apply` (crea también la instancia `pasarela` con Caddy), desde el navegador del equipo anfitrión:
+
+1. Abrir `https://192.168.56.20/`. La primera vez el navegador advierte que el certificado no es de confianza (lo firma la CA interna de Caddy): **Configuración avanzada → Continuar**. HTTPS es obligatorio para usar cámara y micrófono.
+2. Elegir **nodo1** o **nodo2** y escribir un nombre. Para probar entre nodos: una ventana por `/nodo1/` y otra (ventana de incógnito u otro navegador) por `/nodo2/`.
+3. Clic en un contacto para chatear. Botón de cámara: videollamada (el otro contesta o rechaza); durante la llamada se puede silenciar, apagar la cámara y colgar.
+4. Clip: enviar archivos de cualquier tipo y tamaño (probado con 21 MB y 40 MB). Barra de progreso en ambos lados; el receptor verifica SHA-256 y puede ver imágenes, reproducir audio y video o descargar.
+
+Errores que se muestran al usuario: permiso de cámara negado, contacto desconectado (termina la llamada), archivo interrumpido, sin respuesta a la llamada, pérdida de conexión con el servidor (reintenta cada 3 s).
+
+Opcional, para evitar la advertencia del certificado: `incus file pull pasarela/var/lib/caddy/.local/share/caddy/pki/authorities/local/root.crt .` e importar `root.crt` en Windows como entidad de certificación raíz de confianza.
+
 ## Puertos
 
 | Puerto | Dónde | Uso |
 |---|---|---|
 | 8080/tcp | nodo1 y nodo2 (red interna `redmsg`) | HTTP, WebSocket de clientes (`/ws`) y de federación (`/federacion`) |
-| 443/tcp, 3478/udp | pasarela (fase 3) | HTTPS/WSS y STUN/TURN |
+| 443/tcp y 80/tcp | anfitrión → pasarela (dispositivo proxy de Incus) | HTTPS/WSS (Caddy); 80 redirige a 443 |
+| 3478/udp | STUN público (local) / coturn (nube, pendiente) | Descubrimiento de candidatos ICE |
+| UDP efímeros | entre navegadores | WebRTC: SRTP (medios) y SCTP/DTLS (datos) |
 
 ## Problemas conocidos
 
