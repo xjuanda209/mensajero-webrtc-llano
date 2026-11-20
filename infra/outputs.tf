@@ -5,7 +5,7 @@ output "nodos" {
 
 output "url" {
   description = "Dirección para abrir el mensajero desde el navegador"
-  value       = "https://${var.dominio}/  (nodo1: /nodo1/  nodo2: /nodo2/)"
+  value       = "https://${var.dominio}/  (asignacion automatica; forzar nodo: /nodo1/ o /nodo2/)"
 }
 
 output "siguiente_paso" {

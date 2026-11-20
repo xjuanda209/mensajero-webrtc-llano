@@ -88,7 +88,6 @@ resource "incus_instance" "pasarela" {
       dominio     = var.dominio
       tls_interno = var.tls_interno
       puerto      = var.puerto
-      portada_b64 = filebase64("${path.module}/pasarela/index.html")
     })
   }
 

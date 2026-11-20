@@ -5,10 +5,6 @@ packages:
   - caddy
 
 write_files:
-  - path: /var/www/mensajero/index.html
-    encoding: b64
-    content: ${portada_b64}
-    permissions: "0644"
   - path: /etc/caddy/Caddyfile
     permissions: "0644"
     content: |
@@ -30,9 +26,14 @@ write_files:
         handle_path /nodo2/* {
           reverse_proxy nodo2.incus:${puerto}
         }
+        # Entrada principal: balanceo entre los dos nodos. La cookie mantiene a cada
+        # navegador en el mismo nodo (pagina y WebSocket); si un nodo cae, se usa el otro.
         handle {
-          root * /var/www/mensajero
-          file_server
+          reverse_proxy nodo1.incus:${puerto} nodo2.incus:${puerto} {
+            lb_policy cookie mensajero_nodo
+            lb_try_duration 3s
+            fail_duration 30s
+          }
         }
       }
 
