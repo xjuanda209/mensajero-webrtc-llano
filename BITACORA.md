@@ -120,3 +120,5 @@ Una entrada por sesión de trabajo: fecha, tiempo dedicado, qué se hizo, proble
 
 **Uso de IA**
 - Claude escribió el cifrado, la interfaz nueva y las correcciones; se verificaron con pruebas automáticas (Playwright) y en el log del servidor se comprobó que el texto del chat ya no es legible.
+
+**Ajuste (caché del navegador y actualización en la VM):** tras actualizar, el navegador seguía mostrando la interfaz vieja. Había dos causas: en la VM `git pull` se abortó porque había copias de archivos hechas a mano (por `scp`) que chocaban con las del repositorio, y además el navegador podía usar `app.js` guardado en caché. Ahora `/` se sirve con `Cache-Control: no-cache` y `app.js`/`estilos.css` llevan `?v=<huella>` (SHA-256 corto de la interfaz); `/salud` muestra `version_web` para comprobar qué versión tiene cada nodo. En la VM, desde ahora solo se actualiza con `git pull`.

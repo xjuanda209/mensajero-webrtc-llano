@@ -400,7 +400,7 @@ async def conectar_par(app):
 
 # ---------------------------------------------------------------- HTTP
 async def salud(request):
-    return web.json_response({"nodo": NODO, "par": PAR, "enlace_activo": bool(enlaces),
+    return web.json_response({"nodo": NODO, "version_web": version_web(), "par": PAR, "enlace_activo": bool(enlaces),
                               "usuarios_locales": sorted(locales), "usuarios_remotos": remotos,
                               "salas": resumen_salas()})
 
@@ -409,10 +409,26 @@ async def config(request):
     return web.json_response({"nodo": NODO, "iceServers": ICE})
 
 
+def version_web():
+    """Huella corta de los archivos de la interfaz: cambia cada vez que se actualizan."""
+    import hashlib
+    h = hashlib.sha256()
+    for nombre in ("index.html", "app.js", "estilos.css"):
+        f = WEB / nombre
+        if f.exists():
+            h.update(f.read_bytes())
+    return h.hexdigest()[:8]
+
+
 async def indice(request):
     archivo = WEB / "index.html"
     if archivo.exists():
-        return web.FileResponse(archivo)
+        # Evita que el navegador use una versión vieja de la interfaz guardada en caché:
+        # la página no se guarda y los .js/.css llevan ?v=<huella>.
+        v = version_web()
+        html = archivo.read_text(encoding="utf-8")
+        html = html.replace('static/estilos.css"', f'static/estilos.css?v={v}"').replace('static/app.js"', f'static/app.js?v={v}"')
+        return web.Response(text=html, content_type="text/html", headers={"Cache-Control": "no-cache"})
     return web.Response(text=f"Mensajero WebRTC - {NODO}. La interfaz llega en la fase 3; usa /ws o /salud.\n")
 
 
